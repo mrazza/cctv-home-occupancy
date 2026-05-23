@@ -20,8 +20,8 @@ def main():
     parser.add_argument("--rtsp", type=str, default=CONFIG.rtsp_url, help="RTSP stream URL")
     parser.add_argument("--tripwire", type=str, default=None, 
                         help="Coordinates of the tripwire as a comma-separated list of four floats (x1,y1,x2,y2) or JSON string")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="FastAPI host")
-    parser.add_argument("--port", type=int, default=8000, help="FastAPI port")
+    parser.add_argument("--host", type=str, default=CONFIG.host, help="FastAPI host")
+    parser.add_argument("--port", type=int, default=CONFIG.port, help="FastAPI port")
     parser.add_argument("--no-api", action="store_true", help="Disable the FastAPI server")
     parser.add_argument("--no-pipeline", action="store_true", help="Disable the stream monitoring pipeline")
     

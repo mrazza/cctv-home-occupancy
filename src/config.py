@@ -6,6 +6,10 @@ class CameraConfig(BaseModel):
     rtsp_url: str = Field(default="rtsp://localhost:8554/nest-cam", description="RTSP URL for the camera stream")
     fps_limit: int = Field(default=10, description="Target frames per second to process")
     
+    # API Server Settings
+    host: str = Field(default="0.0.0.0", description="IP address to bind the API server to")
+    port: int = Field(default=8000, description="Port to bind the API server to")
+    
     # Motion Detection Parameters (Fast Stage)
     motion_threshold: float = Field(default=0.005, description="Fraction of frame pixels changed to trigger motion (0.0 to 1.0)")
     motion_min_contour_area: int = Field(default=500, description="Minimum contour area for motion detection")
@@ -44,6 +48,8 @@ def load_config() -> CameraConfig:
     env_mappings = {
         "CCTV_RTSP_URL": ("rtsp_url", str),
         "CCTV_FPS_LIMIT": ("fps_limit", int),
+        "CCTV_HOST": ("host", str),
+        "CCTV_PORT": ("port", int),
         "CCTV_MOTION_THRESHOLD": ("motion_threshold", float),
         "CCTV_MIN_CONTOUR_AREA": ("motion_min_contour_area", int),
         "CCTV_BACKGROUND_ALPHA": ("background_alpha", float),
