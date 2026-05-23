@@ -1,5 +1,5 @@
 import os
-import re
+import json
 import cv2
 import argparse
 import numpy as np
@@ -52,38 +52,34 @@ def normalize_coordinates(A: Tuple[int, int], B: Tuple[int, int], width: int, he
         (round(B[0] / width, 4), round(B[1] / height, 4))
     ]
 
-def update_config_file(config_path: str, line: List[Tuple[float, float]]) -> bool:
+def update_config_file(config_json_path: str, line: List[Tuple[float, float]]) -> bool:
     """
-    Safely edits the tripwire_line configuration line in config.py with the new coordinates.
+    Safely saves the tripwire_line coordinates to config.json.
     """
-    if not os.path.exists(config_path):
-        return False
+    try:
+        config_data = {}
+        if os.path.exists(config_json_path):
+            with open(config_json_path, "r") as f:
+                try:
+                    config_data = json.load(f)
+                    if not isinstance(config_data, dict):
+                        config_data = {}
+                except Exception:
+                    config_data = {}
+                    
+        config_data["tripwire_line"] = line
         
-    with open(config_path, "r") as f:
-        content = f.read()
-        
-    pattern = r"tripwire_line:\s*list\[tuple\[float,\s*float\]\]\s*=\s*Field\(\s*default=\[.*?\]"
-    replacement = f"tripwire_line: list[tuple[float, float]] = Field(\n        default={str(line)}"
-    
-    # Also handle loading inside configuration initialization if present
-    content_new, count = re.subn(pattern, replacement, content, flags=re.DOTALL)
-    
-    if count == 0:
-        # Fallback to general line-by-line replacement if format slightly differs
-        pattern_fallback = r"default=\[\(\s*\d+\.\d+,\s*\d+\.\d+\),\s*\(\s*\d+\.\d+,\s*\d+\.\d+\)\s*\]"
-        content_new, count = re.subn(pattern_fallback, f"default={str(line)}", content)
-        
-    if count > 0:
-        with open(config_path, "w") as f:
-            f.write(content_new)
+        with open(config_json_path, "w") as f:
+            json.dump(config_data, f, indent=4)
         return True
-        
-    return False
+    except Exception as e:
+        print(f"[-] Error writing to config file: {e}")
+        return False
 
 class CalibrationApp:
-    def __init__(self, stream_url: str, config_path: str = "src/config.py"):
+    def __init__(self, stream_url: str, config_json_path: str = "config.json"):
         self.stream_url = stream_url
-        self.config_path = config_path
+        self.config_json_path = config_json_path
         self.cap = cv2.VideoCapture(stream_url)
         self.frame = None
         
@@ -130,7 +126,7 @@ class CalibrationApp:
             # Locked Tripwire
             cv2.line(frame_draw, self.pt_A, self.pt_B, (255, 0, 0), 3, cv2.LINE_AA)
             cv2.circle(frame_draw, self.pt_A, 6, (0, 0, 255), -1)
-            cv2.circle(frame_draw, self.pt_B, 6, (255, 0, 0), -1)
+            cv2.circle(frame_draw, self.pt_B, 6, (255, 0, -1), -1)
             
             # Label Point A & B
             cv2.putText(frame_draw, "A", (self.pt_A[0] - 15, self.pt_A[1] - 10),
@@ -161,7 +157,6 @@ class CalibrationApp:
         while True:
             ret, frame = self.cap.read()
             if not ret or frame is None:
-                # If static image or feed ends, reuse the last grabbed frame
                 if self.frame is not None:
                     frame = self.frame.copy()
                 else:
@@ -190,12 +185,12 @@ class CalibrationApp:
                     norm_line = normalize_coordinates(self.pt_A, self.pt_B, w, h)
                     print(f"[*] Normalized line drawn: {norm_line}")
                     
-                    success = update_config_file(self.config_path, norm_line)
+                    success = update_config_file(self.config_json_path, norm_line)
                     if success:
-                        print(f"[+] Saved successfully to {self.config_path}!")
+                        print(f"[+] Saved successfully to {self.config_json_path}!")
                         break
                     else:
-                        print(f"[-] Error: Could not update config file at {self.config_path}")
+                        print(f"[-] Error: Could not update config file at {self.config_json_path}")
                 else:
                     print("[-] Warning: Complete drawing the tripwire (Point A and B) before saving!")
 
@@ -205,7 +200,8 @@ class CalibrationApp:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visual Tripwire Calibration Tool")
     parser.add_argument("--rtsp", type=str, default=CONFIG.rtsp_url, help="RTSP stream URL")
+    parser.add_argument("--config", type=str, default="config.json", help="Path to config JSON file")
     args = parser.parse_args()
     
-    app = CalibrationApp(args.rtsp)
+    app = CalibrationApp(args.rtsp, config_json_path=args.config)
     app.run()
