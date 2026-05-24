@@ -20,38 +20,43 @@ class DatabaseManager:
         return conn
 
     def init_db(self):
-        with self.get_connection() as conn:
-            # Table 1: presence_state (Single row table)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS presence_state (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    is_someone_home BOOLEAN NOT NULL DEFAULT 0,
-                    current_occupancy INTEGER NOT NULL DEFAULT 0,
-                    last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-            
-            # Ensure the single row exists
-            conn.execute("""
-                INSERT OR IGNORE INTO presence_state (id, is_someone_home, current_occupancy)
-                VALUES (1, 0, 0);
-            """)
+        conn = self.get_connection()
+        try:
+            with conn:
+                # Table 1: presence_state (Single row table)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS presence_state (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        is_someone_home BOOLEAN NOT NULL DEFAULT 0,
+                        current_occupancy INTEGER NOT NULL DEFAULT 0,
+                        last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                
+                # Ensure the single row exists
+                conn.execute("""
+                    INSERT OR IGNORE INTO presence_state (id, is_someone_home, current_occupancy)
+                    VALUES (1, 0, 0);
+                """)
 
-            # Table 2: events_log
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS events_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_type TEXT NOT NULL CHECK(event_type IN ('ENTER', 'LEAVE', 'FORCE_RESET')),
-                    tracker_id INTEGER,
-                    confidence REAL,
-                    timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    snapshot_path TEXT
-                );
-            """)
-            conn.commit()
+                # Table 2: events_log
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS events_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        event_type TEXT NOT NULL CHECK(event_type IN ('ENTER', 'LEAVE', 'FORCE_RESET')),
+                        tracker_id INTEGER,
+                        confidence REAL,
+                        timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        snapshot_path TEXT
+                    );
+                """)
+                conn.commit()
+        finally:
+            conn.close()
 
     def get_current_state(self) -> Dict[str, Any]:
-        with self.get_connection() as conn:
+        conn = self.get_connection()
+        try:
             cursor = conn.execute(
                 "SELECT is_someone_home, current_occupancy, last_updated FROM presence_state WHERE id = 1"
             )
@@ -63,6 +68,8 @@ class DatabaseManager:
                     "last_updated": row["last_updated"]
                 }
             return {"is_someone_home": False, "current_occupancy": 0, "last_updated": ""}
+        finally:
+            conn.close()
 
     def log_event(self, event_type: str, tracker_id: Optional[int] = None, 
                   confidence: Optional[float] = None, snapshot_path: Optional[str] = None) -> int:
@@ -73,70 +80,79 @@ class DatabaseManager:
         if confidence is not None:
             confidence = float(confidence)
             
-        with self.get_connection() as conn:
-            now = datetime.now().isoformat()
-            
-            # Determine change in occupancy
-            delta = 0
-            if event_type == "ENTER":
-                delta = 1
-            elif event_type == "LEAVE":
-                delta = -1
+        conn = self.get_connection()
+        try:
+            with conn:
+                now = datetime.now().isoformat()
                 
-            # Log the event
-            cursor = conn.execute("""
-                INSERT INTO events_log (event_type, tracker_id, confidence, timestamp, snapshot_path)
-                VALUES (?, ?, ?, ?, ?)
-            """, (event_type, tracker_id, confidence, now, snapshot_path))
-            event_id = cursor.lastrowid
-            
-            # Fetch current occupancy
-            cursor = conn.execute("SELECT current_occupancy FROM presence_state WHERE id = 1")
-            row = cursor.fetchone()
-            current_count = row["current_occupancy"] if row else 0
-            
-            # Calculate new occupancy, enforcing non-negative values
-            new_count = max(0, current_count + delta)
-            is_home = 1 if new_count > 0 else 0
-            
-            # Update state
-            conn.execute("""
-                UPDATE presence_state
-                SET is_someone_home = ?,
-                    current_occupancy = ?,
-                    last_updated = ?
-                WHERE id = 1
-            """, (is_home, new_count, now))
-            
-            conn.commit()
-            return event_id
+                # Determine change in occupancy
+                delta = 0
+                if event_type == "ENTER":
+                    delta = 1
+                elif event_type == "LEAVE":
+                    delta = -1
+                    
+                # Log the event
+                cursor = conn.execute("""
+                    INSERT INTO events_log (event_type, tracker_id, confidence, timestamp, snapshot_path)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (event_type, tracker_id, confidence, now, snapshot_path))
+                event_id = cursor.lastrowid
+                
+                # Fetch current occupancy
+                cursor = conn.execute("SELECT current_occupancy FROM presence_state WHERE id = 1")
+                row = cursor.fetchone()
+                current_count = row["current_occupancy"] if row else 0
+                
+                # Calculate new occupancy, enforcing non-negative values
+                new_count = max(0, current_count + delta)
+                is_home = 1 if new_count > 0 else 0
+                
+                # Update state
+                conn.execute("""
+                    UPDATE presence_state
+                    SET is_someone_home = ?,
+                        current_occupancy = ?,
+                        last_updated = ?
+                    WHERE id = 1
+                """, (is_home, new_count, now))
+                
+                conn.commit()
+                return event_id
+        finally:
+            conn.close()
 
     def force_reset_state(self, is_someone_home: bool, current_occupancy: int) -> int:
         """Forces a reset on state for reconciliation purposes and logs a FORCE_RESET event."""
-        with self.get_connection() as conn:
-            now = datetime.now().isoformat()
-            
-            # Log the reset event
-            cursor = conn.execute("""
-                INSERT INTO events_log (event_type, tracker_id, confidence, timestamp, snapshot_path)
-                VALUES (?, ?, ?, ?, ?)
-            """, ("FORCE_RESET", None, None, now, None))
-            event_id = cursor.lastrowid
-            
-            # Update state
-            conn.execute("""
-                UPDATE presence_state
-                SET is_someone_home = ?,
-                    current_occupancy = ?,
-                    last_updated = ?
-                WHERE id = 1
-            """, (1 if is_someone_home else 0, max(0, current_occupancy), now))
-            
-            conn.commit()
-            return event_id
+        conn = self.get_connection()
+        try:
+            with conn:
+                now = datetime.now().isoformat()
+                
+                # Log the reset event
+                cursor = conn.execute("""
+                    INSERT INTO events_log (event_type, tracker_id, confidence, timestamp, snapshot_path)
+                    VALUES (?, ?, ?, ?, ?)
+                """, ("FORCE_RESET", None, None, now, None))
+                event_id = cursor.lastrowid
+                
+                # Update state
+                conn.execute("""
+                    UPDATE presence_state
+                    SET is_someone_home = ?,
+                        current_occupancy = ?,
+                        last_updated = ?
+                    WHERE id = 1
+                """, (1 if is_someone_home else 0, max(0, current_occupancy), now))
+                
+                conn.commit()
+                return event_id
+        finally:
+            conn.close()
 
     def get_recent_events(self, limit: int = 10) -> list[Dict[str, Any]]:
-        with self.get_connection() as conn:
+        conn = self.get_connection()
+        try:
             cursor = conn.execute("""
                 SELECT id, event_type, tracker_id, confidence, timestamp, snapshot_path
                 FROM events_log
@@ -145,3 +161,5 @@ class DatabaseManager:
             """, (limit,))
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
