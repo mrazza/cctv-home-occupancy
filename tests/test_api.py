@@ -136,6 +136,17 @@ def test_api_get_snapshot_success(temp_dir, monkeypatch):
     assert response.content == b"dummy_image_data"
 
 
+def test_api_calculate_arrow_endpoint_collinear():
+    """Verifies calculate_arrow_endpoint returns center coordinates if points are collinear/identical."""
+    from src.api import calculate_arrow_endpoint
+    # Zero distance segment
+    A = (10, 10)
+    B = (10, 10)
+    mid, dest = calculate_arrow_endpoint(A, B)
+    assert mid == (10, 10)
+    assert dest == (10, 10)
+
+
 def test_api_get_frame_from_registry():
     """Verifies that the frame is correctly retrieved from FrameRegistry when available."""
     import numpy as np
@@ -281,3 +292,18 @@ def test_api_get_frame_fallback_read_fail(monkeypatch):
     response = client.get("/frame")
     assert response.status_code == 503
     assert "Failed to retrieve frame" in response.json()["detail"]
+
+
+def test_api_get_frame_fallback_encode_fail(monkeypatch):
+    """Verifies 500 error is returned if jpeg encoding fails."""
+    from src.pipeline import FrameRegistry
+    import numpy as np
+
+    with FrameRegistry._lock:
+        FrameRegistry._last_frame = np.zeros((10, 10, 3), dtype=np.uint8)
+
+    monkeypatch.setattr(cv2, "imencode", lambda ext, img: (False, None))
+
+    response = client.get("/frame")
+    assert response.status_code == 500
+    assert "Failed to encode frame" in response.json()["detail"]

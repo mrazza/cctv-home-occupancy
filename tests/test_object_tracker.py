@@ -154,3 +154,42 @@ def test_process_frame_crossing_events(temp_dir):
         events_f4 = tracker.process_frame(frame)
         assert events_f4 == []
         assert 1 not in tracker.track_histories
+
+
+def test_object_tracker_save_crop_zero_size(temp_dir):
+    """Verifies save_crop returns None if the calculated crop bounding box is of zero size."""
+    tracker = ObjectTracker(snapshot_dir=temp_dir)
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    
+    # Bounding box coordinates with size 0: x1=50, y1=50, x2=50, y2=50
+    crop_path = tracker.save_crop(frame, (50, 50, 50, 50), 99, "ENTER")
+    assert crop_path is None
+
+
+def test_object_tracker_save_crop_exception(temp_dir):
+    """Verifies save_crop handles unexpected exceptions gracefully and returns None."""
+    tracker = ObjectTracker(snapshot_dir=temp_dir)
+    # Passing None instead of image to raise exception
+    crop_path = tracker.save_crop(None, (10, 10, 20, 20), 99, "ENTER")
+    assert crop_path is None
+
+
+def test_object_tracker_ccw_orientation_almost_collinear():
+    """Verifies _get_ccw_orientation handles very small non-zero float values as collinear."""
+    tracker = ObjectTracker()
+    A = (0.0, 0.0)
+    B = (1.0, 0.0)
+    # C is extremely close to the line segment AB
+    C = (0.5, 1e-11)
+    assert tracker._get_ccw_orientation(A, B, C) == 0
+
+
+def test_object_tracker_get_point_side_almost_collinear():
+    """Verifies _get_point_side handles very small non-zero float values as collinear."""
+    tracker = ObjectTracker()
+    A = (0.0, 0.0)
+    B = (1.0, 0.0)
+    # P is extremely close to the line segment AB
+    P = (0.5, 1e-11)
+    assert tracker._get_point_side(A, B, P) == 0
+

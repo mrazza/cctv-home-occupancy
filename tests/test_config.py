@@ -94,3 +94,55 @@ def test_load_config_from_file(monkeypatch, temp_dir):
     assert config.rtsp_url == "rtsp://file-url"
     assert config.fps_limit == 5
     assert config.tripwire_line == [(0.5, 0.5), (0.6, 0.6)]
+
+
+def test_load_config_invalid_file(monkeypatch, temp_dir, capsys):
+    """Verifies config loading handles unparseable JSON file gracefully."""
+    config_file_path = os.path.join(temp_dir, "config.json")
+    with open(config_file_path, "w") as f:
+        f.write("{invalid-json}")
+    monkeypatch.setenv("CCTV_CONFIG_PATH", config_file_path)
+    # Ensure no environment variables override
+    for key in list(os.environ.keys()):
+        if key.startswith("CCTV_") and key != "CCTV_CONFIG_PATH":
+            monkeypatch.delenv(key, raising=False)
+
+    config = load_config()
+    # Should fallback to defaults
+    assert config.rtsp_url == "rtsp://localhost:8554/nest-cam"
+    captured = capsys.readouterr()
+    assert "Failed to parse config JSON" in captured.out
+
+
+def test_load_config_env_log_mappings(monkeypatch):
+    """Verifies log file and log level map correctly from environment."""
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    monkeypatch.setenv("CCTV_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("CCTV_LOG_FILE", "null")
+    config = load_config()
+    assert config.log_level == "DEBUG"
+    assert config.log_file is None
+
+    monkeypatch.setenv("CCTV_LOG_FILE", "logs/test.log")
+    config = load_config()
+    assert config.log_file == "logs/test.log"
+
+
+def test_load_config_invalid_env_vars(monkeypatch, capsys):
+    """Verifies config loading reports parsing errors for invalid typed env overrides."""
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    monkeypatch.setenv("CCTV_FPS_LIMIT", "not-an-int")
+    config = load_config()
+    # FPS limit should remain default (10)
+    assert config.fps_limit == 10
+    captured = capsys.readouterr()
+    assert "Failed to parse environment variable CCTV_FPS_LIMIT" in captured.out
+
+
+def test_load_config_tripwire_invalid_line_env(monkeypatch, capsys):
+    """Verifies warning printed when tripwire coordinate values are completely unparseable."""
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    monkeypatch.setenv("CCTV_TRIPWIRE_LINE", "unparseable_triplet_value")
+    config = load_config()
+    captured = capsys.readouterr()
+    assert "Failed to parse CCTV_TRIPWIRE_LINE env" in captured.out

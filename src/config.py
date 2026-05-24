@@ -1,5 +1,6 @@
 import os
 import json
+from typing import Optional
 from pydantic import BaseModel, Field
 
 class CameraConfig(BaseModel):
@@ -9,6 +10,10 @@ class CameraConfig(BaseModel):
     # API Server Settings
     host: str = Field(default="0.0.0.0", description="IP address to bind the API server to")
     port: int = Field(default=8000, description="Port to bind the API server to")
+    
+    # Logging Settings
+    log_level: str = Field(default="INFO", description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+    log_file: Optional[str] = Field(default="logs/cctv.log", description="Path to log file (set to null/None to disable file logging)")
     
     # Motion Detection Parameters (Fast Stage)
     motion_threshold: float = Field(default=0.005, description="Fraction of frame pixels changed to trigger motion (0.0 to 1.0)")
@@ -50,6 +55,8 @@ def load_config() -> CameraConfig:
         "CCTV_FPS_LIMIT": ("fps_limit", int),
         "CCTV_HOST": ("host", str),
         "CCTV_PORT": ("port", int),
+        "CCTV_LOG_LEVEL": ("log_level", str),
+        "CCTV_LOG_FILE": ("log_file", lambda x: None if x.lower() in ("null", "none", "") else str(x)),
         "CCTV_MOTION_THRESHOLD": ("motion_threshold", float),
         "CCTV_MIN_CONTOUR_AREA": ("motion_min_contour_area", int),
         "CCTV_BACKGROUND_ALPHA": ("background_alpha", float),

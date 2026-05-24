@@ -88,3 +88,26 @@ def test_log_event_numpy_types(db_manager):
     assert isinstance(retrieved_tracker_id, int)
     assert abs(retrieved_confidence - 0.85) < 1e-5
     assert isinstance(retrieved_confidence, float)
+
+
+def test_database_get_current_state_empty(temp_dir):
+    """Verifies that if presence_state table is queried but returns no rows, empty defaults are returned."""
+    # Create a fresh db without initializing the row
+    import os
+    from src.database import DatabaseManager
+    db_file = os.path.join(temp_dir, "empty_state.db")
+    db = DatabaseManager(db_file)
+    
+    # Manually delete the default row that is inserted on init_db
+    conn = db.get_connection()
+    try:
+        with conn:
+            conn.execute("DELETE FROM presence_state;")
+            conn.commit()
+    finally:
+        conn.close()
+        
+    state = db.get_current_state()
+    assert state["is_someone_home"] is False
+    assert state["current_occupancy"] == 0
+    assert state["last_updated"] == ""

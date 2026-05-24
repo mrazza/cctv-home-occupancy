@@ -1,11 +1,14 @@
 import cv2
 import time
 import threading
+import logging
 from typing import Optional, List, Dict, Any, Tuple
 from src.config import CONFIG
 from src.motion_detector import MotionDetector
 from src.object_tracker import ObjectTracker
 from src.database import DatabaseManager
+
+logger = logging.getLogger(__name__)
 
 class FrameRegistry:
     _lock = threading.Lock()
@@ -47,39 +50,67 @@ class ThreadedVideoReader:
         self.running = False
         self.lock = threading.Lock()
         self.thread: Optional[threading.Thread] = None
+        self._last_read_time = time.time()
+        self._frame_count = 0
 
     def start(self):
         if self.running:
             return self
+        logger.info(f"Starting ThreadedVideoReader on source: {self.src}")
         self.running = True
         self.thread = threading.Thread(target=self._update, args=(), daemon=True)
         self.thread.start()
         return self
 
     def _update(self):
+        logger.info("ThreadedVideoReader update loop started.")
         while self.running:
             if not self.cap.isOpened():
-                time.sleep(0.1)
+                logger.warning(f"RTSP stream connection lost or not opened. Attempting to reconnect to source: {self.src}")
+                self.cap.release()
+                time.sleep(1.0)
+                self.cap = cv2.VideoCapture(self.src)
+                self._last_read_time = time.time()
                 continue
-            ret, frame = self.cap.read()
-            with self.lock:
-                self.ret = ret
-                if ret:
+
+            try:
+                ret, frame = self.cap.read()
+            except Exception:
+                logger.exception("Exception occurred during cv2.VideoCapture.read()")
+                ret = False
+                frame = None
+
+            if ret and frame is not None:
+                with self.lock:
+                    self.ret = True
                     self.frame = frame
+                self._last_read_time = time.time()
+                self._frame_count += 1
+                if self._frame_count % 3 == 0:  # Use a lower divisor so it's easily coverable in tests
+                    logger.info(f"Heartbeat: ThreadedVideoReader has successfully processed {self._frame_count} frames.")
+            else:
+                # If we haven't successfully read a frame for more than 10.0 seconds, trigger reconnect
+                if time.time() - self._last_read_time > 10.0:
+                    logger.warning(f"RTSP stream read timeout (> 10s) or read failure. Reconnecting to source: {self.src}")
+                    self.cap.release()
+                    time.sleep(1.0)
+                    self.cap = cv2.VideoCapture(self.src)
+                    self._last_read_time = time.time()  # Reset to prevent continuous instant reconnect loops
                 else:
-                    # If stream fails, wait before retry
-                    time.sleep(0.01)
+                    time.sleep(0.001)
 
     def read(self) -> Tuple[bool, Optional[cv2.Mat]]:
         with self.lock:
             return self.ret, self.frame
 
     def stop(self):
+        logger.info("Stopping ThreadedVideoReader...")
         self.running = False
         if self.thread:
             self.thread.join(timeout=1.0)
         if self.cap.isOpened():
             self.cap.release()
+        logger.info("ThreadedVideoReader stopped.")
 
 
 class PipelineOrchestrator:
@@ -102,57 +133,71 @@ class PipelineOrchestrator:
         self.state = "IDLE"  # "IDLE" or "ACTIVE"
         self.cooldown_counter = 0
         self.running = False
+        logger.info(f"PipelineOrchestrator initialized. Cooldown frames: {cooldown_frames}, FPS limit: {fps_limit}")
 
     def process_single_frame(self, frame: cv2.Mat) -> List[Dict[str, Any]]:
         """
         Processes a single frame through the pipeline and updates the database state accordingly.
         Returns crossing events captured in this frame.
         """
-        # Always run motion detection to keep background model updated
-        motion_detected = self.motion_detector.detect(frame)
-        
-        events = []
-        
-        if self.state == "IDLE":
-            if motion_detected:
-                self.state = "ACTIVE"
-                self.cooldown_counter = self.cooldown_frames
-                # Trigger YOLO tracker on this frame
+        try:
+            # Always run motion detection to keep background model updated
+            motion_detected = self.motion_detector.detect(frame)
+            
+            events = []
+            
+            if self.state == "IDLE":
+                if motion_detected:
+                    logger.info("Motion detected! Pipeline transitioning from IDLE to ACTIVE. Triggering YOLO tracker.")
+                    self.state = "ACTIVE"
+                    self.cooldown_counter = self.cooldown_frames
+                    # Trigger YOLO tracker on this frame
+                    events = self.object_tracker.process_frame(frame)
+            
+            elif self.state == "ACTIVE":
+                # Run YOLO Tracker
                 events = self.object_tracker.process_frame(frame)
-        
-        elif self.state == "ACTIVE":
-            # Run YOLO Tracker
-            events = self.object_tracker.process_frame(frame)
-            
-            # Check if we should remain active
-            has_active_tracks = len(self.object_tracker.track_histories) > 0
-            
-            if motion_detected or has_active_tracks:
-                # Reset cooldown
-                self.cooldown_counter = self.cooldown_frames
-            else:
-                self.cooldown_counter -= 1
-                if self.cooldown_counter <= 0:
-                    self.state = "IDLE"
-                    self.motion_detector.reset() # Reset background to adapt to any slow lighting changes
-                    
-        # Log detected events to database
-        for event in events:
-            self.db.log_event(
-                event_type=event["event_type"],
-                tracker_id=event["tracker_id"],
-                confidence=event["confidence"],
-                snapshot_path=event["snapshot_path"]
-            )
-            
-        return events
+                
+                # Check if we should remain active
+                has_active_tracks = len(self.object_tracker.track_histories) > 0
+                
+                if motion_detected or has_active_tracks:
+                    # Reset cooldown
+                    if self.cooldown_counter != self.cooldown_frames:
+                        logger.debug(f"Resetting cooldown counter. (Active tracks: {has_active_tracks})")
+                    self.cooldown_counter = self.cooldown_frames
+                else:
+                    self.cooldown_counter -= 1
+                    logger.debug(f"No motion or active tracks. Cooldown counter decremented to: {self.cooldown_counter}")
+                    if self.cooldown_counter <= 0:
+                        logger.info("No motion or active tracks detected within cooldown window. Pipeline reverting to IDLE.")
+                        self.state = "IDLE"
+                        self.motion_detector.reset() # Reset background to adapt to any slow lighting changes
+                        
+            # Log detected events to database
+            for event in events:
+                logger.info(f"Tripwire crossing event detected: {event['event_type']} (Tracker ID: {event['tracker_id']}, Confidence: {event['confidence']:.2f})")
+                event_id = self.db.log_event(
+                    event_type=event["event_type"],
+                    tracker_id=event["tracker_id"],
+                    confidence=event["confidence"],
+                    snapshot_path=event["snapshot_path"]
+                )
+                logger.info(f"Successfully logged crossing event to DB (Event ID: {event_id})")
+                
+            return events
+        except Exception:
+            logger.exception("Unexpected error occurred while processing a single frame in the pipeline.")
+            return []
 
     def run_on_stream(self, rtsp_url: str):
         """Runs the monitoring pipeline continuously on an RTSP stream (Blocking)."""
+        logger.info(f"Initializing stream reader for: {rtsp_url}")
         reader = ThreadedVideoReader(rtsp_url).start()
         self.running = True
         
         delay = 1.0 / self.fps_limit
+        logger.info(f"Stream pipeline started with delay of {delay:.3f}s between checks.")
         
         try:
             while self.running:
@@ -169,8 +214,14 @@ class PipelineOrchestrator:
                 elapsed = time.time() - start_time
                 sleep_time = max(0.0, delay - elapsed)
                 time.sleep(sleep_time)
+        except Exception:
+            self.running = False
+            logger.exception("Continuous stream processing pipeline crashed due to an unhandled exception.")
         finally:
+            logger.info("Stopping continuous stream processing pipeline...")
             reader.stop()
+            logger.info("Continuous stream processing pipeline stopped.")
 
     def stop(self):
+        logger.info("Orchestrator stop requested.")
         self.running = False

@@ -4,18 +4,26 @@ import argparse
 import threading
 import json
 import uvicorn
+import logging
 from src.config import CONFIG
 from src.database import DatabaseManager
 from src.pipeline import PipelineOrchestrator
+from src.logger import setup_logging
+
+logger = logging.getLogger(__name__)
 
 def run_pipeline(orchestrator, rtsp_url):
-    print(f"[*] Starting CCTV Monitoring Pipeline on: {rtsp_url}")
+    logger.info(f"Starting CCTV Monitoring Pipeline thread on: {rtsp_url}")
     try:
         orchestrator.run_on_stream(rtsp_url)
     except KeyboardInterrupt:
-        print("[*] Stopping pipeline...")
+        logger.info("Stopping pipeline thread due to KeyboardInterrupt...")
 
 def main():
+    # Setup central logging first
+    setup_logging(log_level=CONFIG.log_level, log_file=CONFIG.log_file)
+    logger.info("CCTV Monitoring Daemon starting...")
+
     parser = argparse.ArgumentParser(description="House Presence Monitoring System Daemon")
     parser.add_argument("--rtsp", type=str, default=CONFIG.rtsp_url, help="RTSP stream URL")
     parser.add_argument("--tripwire", type=str, default=None, 
@@ -35,23 +43,23 @@ def main():
             parsed = json.loads(args.tripwire)
             if isinstance(parsed, list) and len(parsed) == 2:
                 tripwire_line = [(float(p[0]), float(p[1])) for p in parsed]
-                print(f"[*] Overriding tripwire line from CLI: {tripwire_line}")
+                logger.info(f"Overriding tripwire line from CLI: {tripwire_line}")
         except Exception:
             try:
                 # Fallback to comma-separated floats
                 floats = [float(x.strip()) for x in args.tripwire.split(",") if x.strip()]
                 if len(floats) == 4:
                     tripwire_line = [(floats[0], floats[1]), (floats[2], floats[3])]
-                    print(f"[*] Overriding tripwire line from CLI list: {tripwire_line}")
+                    logger.info(f"Overriding tripwire line from CLI list: {tripwire_line}")
                 else:
-                    print("[-] Error: Tripwire CLI format must be x1,y1,x2,y2")
+                    logger.error("Error: Tripwire CLI format must be x1,y1,x2,y2")
                     sys.exit(1)
             except Exception as e:
-                print(f"[-] Error parsing tripwire parameter: {e}")
+                logger.error(f"Error parsing tripwire parameter: {e}")
                 sys.exit(1)
                 
     # Initialize DB
-    print(f"[*] Initializing presence database at: {CONFIG.db_path}")
+    logger.info(f"Initializing presence database at: {CONFIG.db_path}")
     db_manager = DatabaseManager(CONFIG.db_path)
     
     threads = []
@@ -77,11 +85,11 @@ def main():
         threads.append(pipeline_thread)
         
     if not args.no_api:
-        print(f"[*] Starting Query API on http://{args.host}:{args.port}")
+        logger.info(f"Starting Query API on http://{args.host}:{args.port}")
         try:
             uvicorn.run("src.api:app", host=args.host, port=args.port, log_level="info")
         except KeyboardInterrupt:
-            print("[*] Stopping API server...")
+            logger.info("Stopping API server due to KeyboardInterrupt...")
         finally:
             if orchestrator:
                 orchestrator.stop()
@@ -91,7 +99,7 @@ def main():
                 for t in threads:
                     t.join()
             except KeyboardInterrupt:
-                print("[*] Exiting...")
+                logger.info("Exiting...")
                 if orchestrator:
                     orchestrator.stop()
 
