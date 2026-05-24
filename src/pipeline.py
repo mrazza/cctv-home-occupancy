@@ -101,7 +101,9 @@ class ThreadedVideoReader:
 
     def read(self) -> Tuple[bool, Optional[cv2.Mat]]:
         with self.lock:
-            return self.ret, self.frame
+            ret = self.ret
+            self.ret = False  # Mark as consumed so subsequent reads return False until a new frame is retrieved
+            return ret, self.frame
 
     def stop(self):
         logger.info("Stopping ThreadedVideoReader...")
