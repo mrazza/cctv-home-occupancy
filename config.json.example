@@ -3,6 +3,8 @@
     "fps_limit": 10,
     "host": "0.0.0.0",
     "port": 8000,
+    "trigger_mode": "continuous",
+    "event_stream_duration": 45,
     "motion_threshold": 0.005,
     "motion_min_contour_area": 500,
     "background_alpha": 0.05,
