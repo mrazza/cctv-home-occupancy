@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS events_log (
 ## 5. Directory Structure
 
 ```
-cctv-monitoring/
+cctv-home-occupancy/
 ├── PLAN.md                   # Full architecture and mathematical spec
 ├── README.md                 # Setup and run guide
 ├── pyproject.toml            # Poetry / packaging configuration

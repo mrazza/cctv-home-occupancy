@@ -1,4 +1,4 @@
-# House Presence Monitoring System (Nest Camera)
+# House Presence Monitoring System (cctv-home-occupancy)
 
 A private, high-performance local Linux pipeline to monitor presence in your home using Nest cameras. It operates in a **"Fast & Slow"** fashion to optimize CPU utilization:
 1. **Fast Stage (0% CPU idle)**: Continuous, ultra-lightweight pixel differencing with OpenCV.
@@ -65,7 +65,7 @@ In screen coordinates, the top-left corner is `(0.0, 0.0)` and the bottom-right 
 
 ### 2. Install Dependencies
 ```bash
-cd sources/mrazza/cctv-monitoring
+cd sources/mrazza/cctv-home-occupancy
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
