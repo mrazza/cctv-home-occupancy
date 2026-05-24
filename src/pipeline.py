@@ -11,13 +11,16 @@ class FrameRegistry:
     _lock = threading.Lock()
     _last_frame: Optional[cv2.Mat] = None
     _last_timestamp: float = 0.0
+    _last_timestamp_iso: Optional[str] = None
 
     @classmethod
     def set_frame(cls, frame: cv2.Mat):
         """Thread-safe update of the latest frame."""
+        from datetime import datetime
         with cls._lock:
             cls._last_frame = frame.copy()
             cls._last_timestamp = time.time()
+            cls._last_timestamp_iso = datetime.now().isoformat()
 
     @classmethod
     def get_frame(cls) -> Optional[cv2.Mat]:
@@ -26,6 +29,12 @@ class FrameRegistry:
             if cls._last_frame is not None:
                 return cls._last_frame.copy()
             return None
+
+    @classmethod
+    def get_last_timestamp_iso(cls) -> Optional[str]:
+        """Thread-safe retrieval of the last processed frame ISO timestamp."""
+        with cls._lock:
+            return cls._last_timestamp_iso
 
 
 class ThreadedVideoReader:

@@ -29,6 +29,7 @@ class StatusResponse(BaseModel):
     is_someone_home: bool = Field(..., description="Whether anyone is currently inside the house")
     current_occupancy: int = Field(..., description="Estimated number of occupants inside")
     last_updated: str = Field(..., description="ISO Timestamp of the last state change")
+    last_processed_frame: Optional[str] = Field(default=None, description="ISO Timestamp of the last processed frame from the camera stream")
 
 
 class EventLogItem(BaseModel):
@@ -53,7 +54,8 @@ def get_status():
         return StatusResponse(
             is_someone_home=state["is_someone_home"],
             current_occupancy=state["current_occupancy"],
-            last_updated=state["last_updated"] or ""
+            last_updated=state["last_updated"] or "",
+            last_processed_frame=FrameRegistry.get_last_timestamp_iso()
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
