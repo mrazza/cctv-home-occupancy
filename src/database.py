@@ -67,6 +67,12 @@ class DatabaseManager:
     def log_event(self, event_type: str, tracker_id: Optional[int] = None, 
                   confidence: Optional[float] = None, snapshot_path: Optional[str] = None) -> int:
         """Logs entry/leave event and updates state atomically."""
+        # Convert any numpy integers/floats or other convertible types to standard python types
+        if tracker_id is not None:
+            tracker_id = int(tracker_id)
+        if confidence is not None:
+            confidence = float(confidence)
+            
         with self.get_connection() as conn:
             now = datetime.now().isoformat()
             

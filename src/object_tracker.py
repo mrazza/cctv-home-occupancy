@@ -173,7 +173,7 @@ class ObjectTracker:
                                     snapshot_path = self.save_crop(frame, bbox, tracker_id, event_type)
                                     events.append({
                                         "event_type": event_type,
-                                        "tracker_id": tracker_id,
+                                        "tracker_id": int(tracker_id),
                                         "confidence": float(conf),
                                         "snapshot_path": snapshot_path
                                     })
