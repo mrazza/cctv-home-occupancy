@@ -65,3 +65,26 @@ def test_force_reset_state(db_manager):
 
     events = db_manager.get_recent_events(limit=5)
     assert events[0]["event_type"] == "FORCE_RESET"
+
+def test_log_event_numpy_types(db_manager):
+    """Ensures that passing NumPy types (like np.int64 and np.float32) does not result in BLOB insertions."""
+    import numpy as np
+
+    # Use NumPy types
+    np_tracker_id = np.int64(42)
+    np_confidence = np.float32(0.85)
+
+    eid = db_manager.log_event("ENTER", tracker_id=np_tracker_id, confidence=np_confidence)
+    assert eid > 0
+
+    # Ensure get_recent_events retrieves Python native int and float, not bytes or numpy types
+    events = db_manager.get_recent_events(limit=1)
+    assert len(events) == 1
+    retrieved_tracker_id = events[0]["tracker_id"]
+    retrieved_confidence = events[0]["confidence"]
+
+    # Assert correct values and types
+    assert retrieved_tracker_id == 42
+    assert isinstance(retrieved_tracker_id, int)
+    assert abs(retrieved_confidence - 0.85) < 1e-5
+    assert isinstance(retrieved_confidence, float)
