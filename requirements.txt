@@ -1,5 +1,6 @@
 opencv-python-headless>=4.8.0
 ultralytics>=8.1.0
+lap>=0.5.12
 fastapi>=0.100.0
 uvicorn>=0.22.0
 pydantic>=2.0
