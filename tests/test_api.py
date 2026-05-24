@@ -1,4 +1,5 @@
 import os
+import cv2
 import pytest
 from fastapi.testclient import TestClient
 from src.api import app, db_manager
@@ -113,3 +114,150 @@ def test_api_get_snapshot_success(temp_dir, monkeypatch):
     response = client.get(f"/snapshot/{snapshot_filename}")
     assert response.status_code == 200
     assert response.content == b"dummy_image_data"
+
+
+def test_api_get_frame_from_registry():
+    """Verifies that the frame is correctly retrieved from FrameRegistry when available."""
+    import numpy as np
+    from src.pipeline import FrameRegistry
+
+    # Create a dummy 480x640 color image (height, width, channels)
+    dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    # Draw a line so it's not completely black
+    cv2.line(dummy_frame, (0, 0), (640, 480), (0, 255, 0), 3)
+
+    FrameRegistry.set_frame(dummy_frame)
+
+    response = client.get("/frame")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+
+    # Decode jpeg back to numpy array to verify
+    img_data = np.frombuffer(response.content, dtype=np.uint8)
+    decoded_img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+    assert decoded_img is not None
+    assert decoded_img.shape == (480, 640, 3)
+
+
+def test_api_get_frame_with_tripwire():
+    """Verifies that drawing the tripwire overlay works correctly and returns a valid image."""
+    import numpy as np
+    from src.pipeline import FrameRegistry
+
+    dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    FrameRegistry.set_frame(dummy_frame)
+
+    response = client.get("/frame?draw_tripwire=true")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+
+    img_data = np.frombuffer(response.content, dtype=np.uint8)
+    decoded_img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+    assert decoded_img is not None
+    assert decoded_img.shape == (480, 640, 3)
+
+
+def test_api_get_frame_with_resizing():
+    """Verifies that the retrieved frame can be resized based on query parameters."""
+    import numpy as np
+    from src.pipeline import FrameRegistry
+
+    dummy_frame = np.zeros((400, 800, 3), dtype=np.uint8)
+    FrameRegistry.set_frame(dummy_frame)
+
+    # Test resizing with both width and height specified
+    response = client.get("/frame?width=200&height=100")
+    assert response.status_code == 200
+    img_data = np.frombuffer(response.content, dtype=np.uint8)
+    decoded_img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+    assert decoded_img.shape == (100, 200, 3)
+
+    # Test resizing with only width specified (aspect ratio maintained)
+    response = client.get("/frame?width=400")
+    assert response.status_code == 200
+    img_data = np.frombuffer(response.content, dtype=np.uint8)
+    decoded_img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+    assert decoded_img.shape == (200, 400, 3)
+
+    # Test resizing with only height specified (aspect ratio maintained)
+    response = client.get("/frame?height=50")
+    assert response.status_code == 200
+    img_data = np.frombuffer(response.content, dtype=np.uint8)
+    decoded_img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+    assert decoded_img.shape == (50, 100, 3)
+
+
+def test_api_get_frame_fallback_success(monkeypatch):
+    """Verifies fallback to VideoCapture when the registry has no frame."""
+    import numpy as np
+    from src.pipeline import FrameRegistry
+
+    # Clear registry
+    with FrameRegistry._lock:
+        FrameRegistry._last_frame = None
+
+    # Mock cv2.VideoCapture
+    class MockVideoCapture:
+        def __init__(self, src):
+            self.src = src
+        def isOpened(self):
+            return True
+        def read(self):
+            # Return a valid dummy frame
+            return True, np.zeros((240, 320, 3), dtype=np.uint8)
+        def release(self):
+            pass
+
+    monkeypatch.setattr(cv2, "VideoCapture", MockVideoCapture)
+
+    response = client.get("/frame")
+    assert response.status_code == 200
+    img_data = np.frombuffer(response.content, dtype=np.uint8)
+    decoded_img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+    assert decoded_img.shape == (240, 320, 3)
+
+
+def test_api_get_frame_fallback_capture_fail(monkeypatch):
+    """Verifies 503 error is returned if fallback VideoCapture fails to open."""
+    from src.pipeline import FrameRegistry
+
+    with FrameRegistry._lock:
+        FrameRegistry._last_frame = None
+
+    class MockVideoCaptureFail:
+        def __init__(self, src):
+            self.src = src
+        def isOpened(self):
+            return False
+        def release(self):
+            pass
+
+    monkeypatch.setattr(cv2, "VideoCapture", MockVideoCaptureFail)
+
+    response = client.get("/frame")
+    assert response.status_code == 503
+    assert "offline or unavailable" in response.json()["detail"]
+
+
+def test_api_get_frame_fallback_read_fail(monkeypatch):
+    """Verifies 503 error is returned if fallback VideoCapture fails to read a frame."""
+    from src.pipeline import FrameRegistry
+
+    with FrameRegistry._lock:
+        FrameRegistry._last_frame = None
+
+    class MockVideoCaptureReadFail:
+        def __init__(self, src):
+            self.src = src
+        def isOpened(self):
+            return True
+        def read(self):
+            return False, None
+        def release(self):
+            pass
+
+    monkeypatch.setattr(cv2, "VideoCapture", MockVideoCaptureReadFail)
+
+    response = client.get("/frame")
+    assert response.status_code == 503
+    assert "Failed to retrieve frame" in response.json()["detail"]

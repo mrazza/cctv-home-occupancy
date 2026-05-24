@@ -7,6 +7,27 @@ from src.motion_detector import MotionDetector
 from src.object_tracker import ObjectTracker
 from src.database import DatabaseManager
 
+class FrameRegistry:
+    _lock = threading.Lock()
+    _last_frame: Optional[cv2.Mat] = None
+    _last_timestamp: float = 0.0
+
+    @classmethod
+    def set_frame(cls, frame: cv2.Mat):
+        """Thread-safe update of the latest frame."""
+        with cls._lock:
+            cls._last_frame = frame.copy()
+            cls._last_timestamp = time.time()
+
+    @classmethod
+    def get_frame(cls) -> Optional[cv2.Mat]:
+        """Thread-safe retrieval of the latest frame."""
+        with cls._lock:
+            if cls._last_frame is not None:
+                return cls._last_frame.copy()
+            return None
+
+
 class ThreadedVideoReader:
     def __init__(self, src: str):
         """Thread-safe background video reader to always retrieve the freshest frame."""
@@ -130,6 +151,8 @@ class PipelineOrchestrator:
                 ret, frame = reader.read()
                 
                 if ret and frame is not None:
+                    # Update the global frame registry for API/external access
+                    FrameRegistry.set_frame(frame)
                     # Process frame
                     self.process_single_frame(frame)
                 
