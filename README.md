@@ -1,6 +1,6 @@
 # House Presence Monitoring System (cctv-home-occupancy)
 
-A private, high-performance local Linux pipeline to monitor presence in your home using Nest cameras. It operates in a **"Fast & Slow"** fashion to optimize CPU utilization:
+A private, high-performance local Linux pipeline to monitor presence in your home using realtime video streams (e.g. Nest cameras). It operates in a **"Fast & Slow"** fashion to optimize CPU utilization:
 1. **Fast Stage (0% CPU idle)**: Continuous, ultra-lightweight pixel differencing with OpenCV.
 2. **Slow Stage (Active AI)**: Activates YOLOv8 and ByteTrack to track people crossing virtual tripwires only when motion is detected.
 
