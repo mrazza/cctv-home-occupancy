@@ -40,6 +40,18 @@ class FrameRegistry:
             return cls._last_timestamp_iso
 
 
+class OrchestratorRegistry:
+    _instance: Optional['PipelineOrchestrator'] = None
+
+    @classmethod
+    def set_instance(cls, instance: 'PipelineOrchestrator'):
+        cls._instance = instance
+
+    @classmethod
+    def get_instance(cls) -> Optional['PipelineOrchestrator']:
+        return cls._instance
+
+
 class ThreadedVideoReader:
     def __init__(self, src: str):
         """Thread-safe background video reader to always retrieve the freshest frame."""
@@ -135,7 +147,21 @@ class PipelineOrchestrator:
         self.state = "IDLE"  # "IDLE" or "ACTIVE"
         self.cooldown_counter = 0
         self.running = False
+        
+        # On-Demand event-driven settings
+        self.active_until = 0.0
+        self.lock = threading.Lock()
+        self.reader = None
+        self.rtsp_url = None
+        
+        OrchestratorRegistry.set_instance(self)
         logger.info(f"PipelineOrchestrator initialized. Cooldown frames: {cooldown_frames}, FPS limit: {fps_limit}")
+
+    def trigger_event_window(self, duration: int):
+        """Triggers or extends the active window for on-demand stream processing."""
+        with self.lock:
+            self.active_until = time.time() + duration
+            logger.info(f"On-demand event-driven window triggered/extended until epoch {self.active_until} (for {duration}s)")
 
     def process_single_frame(self, frame: cv2.Mat) -> List[Dict[str, Any]]:
         """
@@ -194,23 +220,53 @@ class PipelineOrchestrator:
 
     def run_on_stream(self, rtsp_url: str):
         """Runs the monitoring pipeline continuously on an RTSP stream (Blocking)."""
-        logger.info(f"Initializing stream reader for: {rtsp_url}")
-        reader = ThreadedVideoReader(rtsp_url).start()
-        self.running = True
+        self.rtsp_url = rtsp_url
+        logger.info(f"Initializing stream reader with trigger mode: '{CONFIG.trigger_mode}' for: {rtsp_url}")
         
+        # Start continuous reader immediately if in continuous mode
+        if CONFIG.trigger_mode == "continuous":
+            self.reader = ThreadedVideoReader(rtsp_url).start()
+            
+        self.running = True
         delay = 1.0 / self.fps_limit
         logger.info(f"Stream pipeline started with delay of {delay:.3f}s between checks.")
         
         try:
             while self.running:
                 start_time = time.time()
-                ret, frame = reader.read()
                 
-                if ret and frame is not None:
-                    # Update the global frame registry for API/external access
-                    FrameRegistry.set_frame(frame)
-                    # Process frame
-                    self.process_single_frame(frame)
+                is_active = True
+                if CONFIG.trigger_mode == "event":
+                    # Determine if trigger window is active
+                    if time.time() < self.active_until:
+                        if self.reader is None or not self.reader.running:
+                            logger.info("Trigger window active. Lazily starting ThreadedVideoReader...")
+                            self.reader = ThreadedVideoReader(rtsp_url).start()
+                    else:
+                        is_active = False
+                        # Trigger window expired. Check if YOLO is still actively tracking something
+                        has_active_tracks = len(self.object_tracker.track_histories) > 0
+                        if has_active_tracks:
+                            # Keep tracking until they cross or leave
+                            with self.lock:
+                                self.active_until = time.time() + 5.0  # Extend slightly
+                            is_active = True
+                            if self.reader is None or not self.reader.running:
+                                logger.info("Active tracks found. Lazily starting ThreadedVideoReader...")
+                                self.reader = ThreadedVideoReader(rtsp_url).start()
+                        elif self.reader is not None:
+                            logger.info("Trigger window expired and no active tracks. Stopping ThreadedVideoReader to release RTSP quota...")
+                            self.reader.stop()
+                            self.reader = None
+                            self.state = "IDLE"
+                            
+                if is_active and self.reader is not None:
+                    ret, frame = self.reader.read()
+                    if ret and frame is not None:
+                        # Update the global frame registry for API/external access
+                        FrameRegistry.set_frame(frame)
+                        # Process frame
+                        self.process_single_frame(frame)
                 
                 # Regulate Frame Rate
                 elapsed = time.time() - start_time
@@ -221,7 +277,9 @@ class PipelineOrchestrator:
             logger.exception("Continuous stream processing pipeline crashed due to an unhandled exception.")
         finally:
             logger.info("Stopping continuous stream processing pipeline...")
-            reader.stop()
+            if self.reader is not None:
+                self.reader.stop()
+                self.reader = None
             logger.info("Continuous stream processing pipeline stopped.")
 
     def stop(self):

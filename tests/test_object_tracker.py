@@ -193,3 +193,56 @@ def test_object_tracker_get_point_side_almost_collinear():
     P = (0.5, 1e-11)
     assert tracker._get_point_side(A, B, P) == 0
 
+
+def test_object_tracker_enter_crossing_and_history_pop(temp_dir):
+    """Verifies that transition from -1 to 1 triggers ENTER, and history is capped at 10 items."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        # Tripwire at y = 0.5 (middle of frame) horizontal
+        tracker = ObjectTracker(tripwire_line=[(0.0, 0.5), (1.0, 0.5)], snapshot_dir=temp_dir)
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        
+        # Frame 1: Person starts above (y = 20, side = -1)
+        boxes_f1 = MockBoxes([[40, 10, 60, 30]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
+        events_f1 = tracker.process_frame(frame)
+        assert events_f1 == []
+        assert tracker.track_sides[1] == -1
+        
+        # Frame 2: Moves below (y = 80, side = 1) -> triggers ENTER
+        boxes_f2 = MockBoxes([[40, 70, 60, 90]], [1], [0.96])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f2)]
+        events_f2 = tracker.process_frame(frame)
+        assert len(events_f2) == 1
+        assert events_f2[0]["event_type"] == "ENTER"
+        
+        # Now let's push many more frames to trigger popping the history when len > 10
+        for i in range(15):
+            boxes_loop = MockBoxes([[40 + i, 70, 60 + i, 90]], [1], [0.95])
+            mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_loop)]
+            tracker.process_frame(frame)
+            
+        # The history length should be capped at 10
+        assert len(tracker.track_histories[1]) == 10
+
+
+def test_object_tracker_unreachable_else(temp_dir):
+    """Verifies fallback when sides don't map to standard ENTER/LEAVE (though mathematically impossible with -1/1)."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        tracker = ObjectTracker(tripwire_line=[(0.0, 0.5), (1.0, 0.5)], snapshot_dir=temp_dir)
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        
+        # Prime the track
+        boxes_f1 = MockBoxes([[40, 10, 60, 30]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
+        tracker.process_frame(frame)
+        
+        # Manually alter track_sides to a non-standard value to hit 'else' branch
+        tracker.track_sides[1] = 42
+        
+        # Move across line
+        boxes_f2 = MockBoxes([[40, 70, 60, 90]], [1], [0.96])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f2)]
+        events = tracker.process_frame(frame)
+        assert len(events) == 0  # event_type is None
+
+

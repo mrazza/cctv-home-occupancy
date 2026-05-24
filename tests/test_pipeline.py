@@ -239,3 +239,162 @@ def test_pipeline_orchestrator_stop_log(db_manager):
     orchestrator = PipelineOrchestrator(db_manager=db_manager)
     orchestrator.stop()
     assert orchestrator.running is False
+
+def test_pipeline_orchestrator_run_on_stream_event_trigger_mode(db_manager):
+    """Verifies that run_on_stream behaves correctly in on-demand 'event' trigger mode."""
+    from src.config import CONFIG
+    original_mode = CONFIG.trigger_mode
+    CONFIG.trigger_mode = "event"
+    
+    mock_md = MagicMock(spec=MotionDetector)
+    mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.track_histories = {}
+    
+    orchestrator = PipelineOrchestrator(
+        db_manager=db_manager,
+        motion_detector=mock_md,
+        object_tracker=mock_ot,
+        fps_limit=100
+    )
+    
+    # 1. Initially trigger_mode = event, inactive trigger window, no active tracks
+    # We patch ThreadedVideoReader to verify it isn't started
+    with patch('src.pipeline.ThreadedVideoReader') as mock_reader_class:
+        mock_reader = MagicMock()
+        mock_reader_class.return_value = mock_reader
+        mock_reader.start.return_value = mock_reader
+        
+        # Patch time.sleep to terminate loop after first iteration
+        with patch('time.sleep') as mock_sleep:
+            def sleep_side_effect(seconds):
+                orchestrator.running = False
+            mock_sleep.side_effect = sleep_side_effect
+            
+            orchestrator.run_on_stream("rtsp://dummy")
+            
+        assert orchestrator.reader is None
+        assert mock_reader_class.called is False
+
+    # 2. Trigger window active: reader should be started lazily
+    CONFIG.trigger_mode = "event"
+    orchestrator.active_until = time.time() + 10.0
+    with patch('src.pipeline.ThreadedVideoReader') as mock_reader_class:
+        mock_reader = MagicMock()
+        mock_reader_class.return_value = mock_reader
+        mock_reader.start.return_value = mock_reader
+        
+        dummy_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        mock_reader.read.return_value = (True, dummy_frame)
+        
+        with patch('time.sleep') as mock_sleep:
+            def sleep_side_effect(seconds):
+                orchestrator.running = False
+            mock_sleep.side_effect = sleep_side_effect
+            
+            orchestrator.run_on_stream("rtsp://dummy")
+            
+        assert mock_reader_class.called is True
+        assert mock_reader.start.called is True
+        assert mock_reader.stop.called is True
+
+    # 3. Active tracks extend the trigger window even when active_until has passed
+    CONFIG.trigger_mode = "event"
+    orchestrator.active_until = time.time() - 10.0 # expired
+    mock_ot.track_histories = {1: [(50, 50)]} # active track!
+    
+    with patch('src.pipeline.ThreadedVideoReader') as mock_reader_class:
+        mock_reader = MagicMock()
+        mock_reader_class.return_value = mock_reader
+        mock_reader.start.return_value = mock_reader
+        
+        dummy_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        mock_reader.read.return_value = (True, dummy_frame)
+        
+        with patch('time.sleep') as mock_sleep:
+            def sleep_side_effect(seconds):
+                orchestrator.running = False
+            mock_sleep.side_effect = sleep_side_effect
+            
+            orchestrator.run_on_stream("rtsp://dummy")
+            
+        assert orchestrator.active_until > time.time() # window should be extended
+        assert mock_reader_class.called is True
+        assert mock_reader.start.called is True
+        assert mock_reader.stop.called is True
+
+    # Restore original config
+    CONFIG.trigger_mode = original_mode
+
+
+def test_pipeline_orchestrator_event_mode_cleanup_on_expiry(db_manager):
+    """Verifies that an active stream reader is stopped and cleared when active_until expires and there are no active tracks."""
+    from src.config import CONFIG
+    original_mode = CONFIG.trigger_mode
+    CONFIG.trigger_mode = "event"
+    
+    mock_md = MagicMock(spec=MotionDetector)
+    mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.track_histories = {}
+    
+    orchestrator = PipelineOrchestrator(
+        db_manager=db_manager,
+        motion_detector=mock_md,
+        object_tracker=mock_ot,
+        fps_limit=100
+    )
+    
+    # Set the active window to be in the past
+    orchestrator.active_until = time.time() - 10.0
+    
+    # We pre-populate the orchestrator with an active mock reader
+    mock_reader = MagicMock()
+    mock_reader.running = True
+    orchestrator.reader = mock_reader
+    
+    with patch('time.sleep') as mock_sleep:
+        def sleep_side_effect(seconds):
+            orchestrator.running = False
+        mock_sleep.side_effect = sleep_side_effect
+        
+        orchestrator.run_on_stream("rtsp://dummy")
+        
+    # Since active_until was in the past and track_histories is empty,
+    # the reader should have been stopped and cleared.
+    assert mock_reader.stop.called is True
+    assert orchestrator.reader is None
+    
+    CONFIG.trigger_mode = original_mode
+
+
+def test_pipeline_orchestrator_trigger_event_window(db_manager):
+    """Verifies trigger_event_window increases active_until as expected."""
+    orchestrator = PipelineOrchestrator(db_manager=db_manager)
+    assert orchestrator.active_until == 0.0
+    
+    orchestrator.trigger_event_window(30)
+    assert orchestrator.active_until > time.time() + 25.0
+    assert orchestrator.active_until < time.time() + 35.0
+
+
+@patch('cv2.VideoCapture')
+def test_threaded_video_reader_heartbeat(mock_video_capture):
+    """Tests that ThreadedVideoReader successfully triggers heartbeat log after 3 frames."""
+    mock_cap = MagicMock()
+    mock_cap.isOpened.return_value = True
+    dummy_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    
+    def side_effect():
+        return True, dummy_frame
+    mock_cap.read.side_effect = side_effect
+    mock_video_capture.return_value = mock_cap
+    
+    reader = ThreadedVideoReader("rtsp://test-url")
+    reader.start()
+    
+    # Allow background thread to process several frames to trigger the heartbeat log
+    time.sleep(0.5)
+    reader.stop()
+    
+    assert reader._frame_count >= 3
+
+

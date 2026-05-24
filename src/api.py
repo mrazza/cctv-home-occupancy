@@ -188,3 +188,22 @@ def get_current_frame(
         raise HTTPException(status_code=500, detail="Failed to encode frame as JPEG.")
         
     return Response(content=jpeg.tobytes(), media_type="image/jpeg")
+
+
+@app.post("/webhook/trigger_motion", tags=["Trigger"])
+def trigger_motion_event():
+    """Endpoint for Scrypted/external webhooks to trigger on-demand stream processing upon motion detection."""
+    if CONFIG.trigger_mode != "event":
+        raise HTTPException(status_code=400, detail="System is not in on-demand 'event' trigger mode.")
+    
+    from src.pipeline import OrchestratorRegistry
+    orchestrator = OrchestratorRegistry.get_instance()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="CCTV monitoring orchestrator is not running or initialized.")
+    
+    orchestrator.trigger_event_window(duration=CONFIG.event_stream_duration)
+    return {
+        "status": "success",
+        "message": "On-demand stream processing triggered",
+        "active_until": orchestrator.active_until
+    }

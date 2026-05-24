@@ -146,3 +146,13 @@ def test_load_config_tripwire_invalid_line_env(monkeypatch, capsys):
     config = load_config()
     captured = capsys.readouterr()
     assert "Failed to parse CCTV_TRIPWIRE_LINE env" in captured.out
+
+def test_load_config_trigger_mode_env(monkeypatch):
+    """Verifies that trigger_mode and event_stream_duration map correctly from environment overrides."""
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    monkeypatch.setenv("CCTV_TRIGGER_MODE", "event")
+    monkeypatch.setenv("CCTV_EVENT_STREAM_DURATION", "60")
+    config = load_config()
+    assert config.trigger_mode == "event"
+    assert config.event_stream_duration == 60
+

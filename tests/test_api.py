@@ -1,6 +1,7 @@
 import os
 import cv2
 import pytest
+from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from src.api import app, db_manager
 from src.config import CONFIG
@@ -307,3 +308,60 @@ def test_api_get_frame_fallback_encode_fail(monkeypatch):
     response = client.get("/frame")
     assert response.status_code == 500
     assert "Failed to encode frame" in response.json()["detail"]
+
+def test_api_trigger_motion_endpoint_disabled_by_default():
+    """Verifies that trigger_motion returns 400 if trigger_mode is not 'event'."""
+    from src.config import CONFIG
+    original_mode = CONFIG.trigger_mode
+    CONFIG.trigger_mode = "continuous"
+    try:
+        response = client.post("/webhook/trigger_motion")
+        assert response.status_code == 400
+        assert "not in on-demand" in response.json()["detail"]
+    finally:
+        CONFIG.trigger_mode = original_mode
+
+
+def test_api_trigger_motion_endpoint_orchestrator_not_initialized():
+    """Verifies that trigger_motion returns 503 if OrchestratorRegistry instance is None."""
+    from src.config import CONFIG
+    from src.pipeline import OrchestratorRegistry
+    
+    original_mode = CONFIG.trigger_mode
+    CONFIG.trigger_mode = "event"
+    
+    original_instance = OrchestratorRegistry.get_instance()
+    OrchestratorRegistry.set_instance(None)
+    
+    try:
+        response = client.post("/webhook/trigger_motion")
+        assert response.status_code == 503
+        assert "orchestrator is not running" in response.json()["detail"]
+    finally:
+        CONFIG.trigger_mode = original_mode
+        OrchestratorRegistry.set_instance(original_instance)
+
+
+def test_api_trigger_motion_endpoint_success():
+    """Verifies that trigger_motion successfully wakes up orchestrator when configured."""
+    from src.config import CONFIG
+    from src.pipeline import OrchestratorRegistry
+    
+    original_mode = CONFIG.trigger_mode
+    CONFIG.trigger_mode = "event"
+    
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.active_until = 12345.67
+    
+    original_instance = OrchestratorRegistry.get_instance()
+    OrchestratorRegistry.set_instance(mock_orchestrator)
+    
+    try:
+        response = client.post("/webhook/trigger_motion")
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+        mock_orchestrator.trigger_event_window.assert_called_once_with(duration=CONFIG.event_stream_duration)
+    finally:
+        CONFIG.trigger_mode = original_mode
+        OrchestratorRegistry.set_instance(original_instance)
+

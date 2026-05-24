@@ -15,6 +15,10 @@ class CameraConfig(BaseModel):
     log_level: str = Field(default="INFO", description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
     log_file: Optional[str] = Field(default="logs/cctv.log", description="Path to log file (set to null/None to disable file logging)")
     
+    # Trigger Mode
+    trigger_mode: str = Field(default="continuous", description="Trigger mode: 'continuous' or 'event'")
+    event_stream_duration: int = Field(default=45, description="Duration in seconds to keep stream active after a trigger event")
+    
     # Motion Detection Parameters (Fast Stage)
     motion_threshold: float = Field(default=0.005, description="Fraction of frame pixels changed to trigger motion (0.0 to 1.0)")
     motion_min_contour_area: int = Field(default=500, description="Minimum contour area for motion detection")
@@ -57,6 +61,8 @@ def load_config() -> CameraConfig:
         "CCTV_PORT": ("port", int),
         "CCTV_LOG_LEVEL": ("log_level", str),
         "CCTV_LOG_FILE": ("log_file", lambda x: None if x.lower() in ("null", "none", "") else str(x)),
+        "CCTV_TRIGGER_MODE": ("trigger_mode", str),
+        "CCTV_EVENT_STREAM_DURATION": ("event_stream_duration", int),
         "CCTV_MOTION_THRESHOLD": ("motion_threshold", float),
         "CCTV_MIN_CONTOUR_AREA": ("motion_min_contour_area", int),
         "CCTV_BACKGROUND_ALPHA": ("background_alpha", float),
