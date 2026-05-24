@@ -73,24 +73,42 @@ You need to tell Scrypted to hit your daemon's webhook when motion is detected.
 3. Create a new Automation Rule:
    - **Name**: `Trigger Tripwire Stream`
    - **Trigger**: Select your Nest Camera and choose **Motion Detected**.
-   - **Action**: Add a Javascript/Script action with the following snippet:
+   - **Action**: Add a Javascript/Script action with the following snippet using the modern native `fetch` API:
      ```javascript
      // Replace with your python API host and port
      const API_URL = "http://192.168.1.100:8000/webhook/trigger_motion";
      
-     log.info("Sending trigger to presence tripwire daemon...");
-     sdk.systemManager.getDeviceByName("HttpClient")
-        .post(API_URL, null)
-        .then(() => log.info("Successfully triggered daemon!"))
-        .catch(err => log.error("Failed to trigger tripwire daemon: " + err));
+     console.info("Sending trigger to presence tripwire daemon...");
+     
+     fetch(API_URL, { method: "POST" })
+         .then(res => {
+             if (res.ok) {
+                 console.info("Successfully triggered daemon!");
+             } else {
+                 console.error("Failed to trigger daemon, status: " + res.status);
+             }
+         })
+         .catch(err => console.error("Failed to trigger tripwire daemon: " + err.message));
      ```
 
-#### Method B: Using Scrypted Webhooks Plugin
-1. Install the **Webhooks** plugin in Scrypted.
-2. Set up a Webhook Extension on your Nest Camera.
-3. Configure a Rule:
-   - When **Motion Detected** on `Nest Camera`.
-   - Send `POST` to `http://<YOUR_DAEMON_IP>:8000/webhook/trigger_motion`.
+#### Method B: Native Node.js HTTP Fallback (If fetch is unavailable)
+If your version of Scrypted runs on an older runtime without global `fetch`, use Node's native `http` module:
+```javascript
+const http = require('http');
+
+const API_URL = "http://192.168.1.100:8000/webhook/trigger_motion";
+console.info("Sending trigger to presence tripwire daemon...");
+
+const req = http.request(API_URL, { method: 'POST' }, (res) => {
+    console.info(`Response status from daemon: ${res.statusCode}`);
+});
+
+req.on('error', (err) => {
+    console.error("Failed to trigger tripwire daemon: " + err.message);
+});
+
+req.end();
+```
 
 ---
 
