@@ -40,21 +40,27 @@ def calculate_arrow_endpoint(A: Tuple[int, int], B: Tuple[int, int], length: flo
     
     return (Cx, Cy), (Dx, Dy)
 
-def normalize_coordinates(A: Tuple[int, int], B: Tuple[int, int], width: int, height: int) -> List[Tuple[float, float]]:
+def normalize_coordinates(A: Tuple[int, int], B: Tuple[int, int], width: int, height: int, sort_coords: bool = False) -> List[Tuple[float, float]]:
     """
     Converts raw pixel coordinates to normalized floats between 0.0 and 1.0.
     """
     if width <= 0 or height <= 0:
         raise ValueError("Width and height must be positive values")
         
+    if sort_coords:
+        x1, x2 = sorted([A[0], B[0]])
+        y1, y2 = sorted([A[1], B[1]])
+        A = (x1, y1)
+        B = (x2, y2)
+        
     return [
         (round(A[0] / width, 4), round(A[1] / height, 4)),
         (round(B[0] / width, 4), round(B[1] / height, 4))
     ]
 
-def update_config_file(config_json_path: str, line: List[Tuple[float, float]]) -> bool:
+def update_config_file(config_json_path: str, coordinates: List[Tuple[float, float]], key: str = "tripwire_line") -> bool:
     """
-    Safely saves the tripwire_line coordinates to config.json.
+    Safely saves the coordinates to config.json under the specified key.
     """
     try:
         config_data = {}
@@ -67,7 +73,7 @@ def update_config_file(config_json_path: str, line: List[Tuple[float, float]]) -
                 except Exception:
                     config_data = {}
                     
-        config_data["tripwire_line"] = line
+        config_data[key] = coordinates
         
         with open(config_json_path, "w") as f:
             json.dump(config_data, f, indent=4)
@@ -77,13 +83,14 @@ def update_config_file(config_json_path: str, line: List[Tuple[float, float]]) -
         return False
 
 class CalibrationApp:
-    def __init__(self, stream_url: str, config_json_path: str = "config.json"):
+    def __init__(self, stream_url: str, config_json_path: str = "config.json", mode: str = "tripwire"):
         self.stream_url = stream_url
         self.config_json_path = config_json_path
+        self.mode = mode
         self.cap = cv2.VideoCapture(stream_url)
         self.frame = None
         
-        # Line State
+        # Point/Line/Box State
         self.pt_A = None
         self.pt_B = None
         self.mouse_pos = None
@@ -107,38 +114,63 @@ class CalibrationApp:
         h, w, _ = frame_draw.shape
         
         # Display instructions
-        cv2.putText(frame_draw, "Left click once for Point A (start), again for Point B (end)", (15, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
-        cv2.putText(frame_draw, "Press [S] to Save | [R] to Reset | [Q] to Quit", (15, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+        if self.mode == "roi":
+            cv2.putText(frame_draw, "ROI CALIBRATION MODE", (15, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(frame_draw, "Left click for corner A, again for opposite corner B", (15, 55),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(frame_draw, "Press [S] to Save | [R] to Reset | [Q] to Quit", (15, 80),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+        else:
+            cv2.putText(frame_draw, "TRIPWIRE CALIBRATION MODE", (15, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(frame_draw, "Left click once for Point A (start), again for Point B (end)", (15, 55),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(frame_draw, "Press [S] to Save | [R] to Reset | [Q] to Quit", (15, 80),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
         
         # Draw status
         if self.pt_A is None:
-            cv2.putText(frame_draw, "Status: Click to place Point A (Start)", (15, h - 20),
+            cv2.putText(frame_draw, "Status: Click to place Point A", (15, h - 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2, cv2.LINE_AA)
         elif self.is_drawing and self.mouse_pos:
-            # Drawing preview line
-            cv2.line(frame_draw, self.pt_A, self.mouse_pos, (255, 100, 0), 2, cv2.LINE_AA)
+            # Drawing preview
+            if self.mode == "roi":
+                cv2.rectangle(frame_draw, self.pt_A, self.mouse_pos, (0, 255, 255), 2, cv2.LINE_AA)
+            else:
+                cv2.line(frame_draw, self.pt_A, self.mouse_pos, (255, 100, 0), 2, cv2.LINE_AA)
             cv2.circle(frame_draw, self.pt_A, 5, (0, 0, 255), -1)
-            cv2.putText(frame_draw, "Status: Click to place Point B (End)", (15, h - 20),
+            cv2.putText(frame_draw, "Status: Click to place Point B", (15, h - 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
         elif self.pt_B:
-            # Locked Tripwire
-            cv2.line(frame_draw, self.pt_A, self.pt_B, (255, 0, 0), 3, cv2.LINE_AA)
-            cv2.circle(frame_draw, self.pt_A, 6, (0, 0, 255), -1)
-            cv2.circle(frame_draw, self.pt_B, 6, (255, 0, -1), -1)
-            
-            # Label Point A & B
-            cv2.putText(frame_draw, "A", (self.pt_A[0] - 15, self.pt_A[1] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame_draw, "B", (self.pt_B[0] + 10, self.pt_B[1] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2, cv2.LINE_AA)
-            
-            # Calculate and draw left perpendicular arrow
-            mid, arrow_dest = calculate_arrow_endpoint(self.pt_A, self.pt_B)
-            cv2.arrowedLine(frame_draw, mid, arrow_dest, (0, 255, 0), 3, tipLength=0.3, line_type=cv2.LINE_AA)
-            cv2.putText(frame_draw, "INSIDE / ENTER", (arrow_dest[0] + 10, arrow_dest[1] + 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
+            if self.mode == "roi":
+                # Draw the final rectangle
+                overlay = frame_draw.copy()
+                cv2.rectangle(overlay, self.pt_A, self.pt_B, (0, 255, 0), -1)
+                cv2.addWeighted(overlay, 0.15, frame_draw, 0.85, 0, frame_draw)
+                # Outer border
+                cv2.rectangle(frame_draw, self.pt_A, self.pt_B, (0, 255, 0), 2, cv2.LINE_AA)
+                cv2.circle(frame_draw, self.pt_A, 5, (0, 0, 255), -1)
+                cv2.circle(frame_draw, self.pt_B, 5, (255, 0, 0), -1)
+                cv2.putText(frame_draw, "ROI Bounds", (min(self.pt_A[0], self.pt_B[0]) + 5, min(self.pt_A[1], self.pt_B[1]) + 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
+            else:
+                # Locked Tripwire
+                cv2.line(frame_draw, self.pt_A, self.pt_B, (255, 0, 0), 3, cv2.LINE_AA)
+                cv2.circle(frame_draw, self.pt_A, 6, (0, 0, 255), -1)
+                cv2.circle(frame_draw, self.pt_B, 6, (255, 0, 0), -1)
+                
+                # Label Point A & B
+                cv2.putText(frame_draw, "A", (self.pt_A[0] - 15, self.pt_A[1] - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA)
+                cv2.putText(frame_draw, "B", (self.pt_B[0] + 10, self.pt_B[1] - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2, cv2.LINE_AA)
+                
+                # Calculate and draw left perpendicular arrow
+                mid, arrow_dest = calculate_arrow_endpoint(self.pt_A, self.pt_B)
+                cv2.arrowedLine(frame_draw, mid, arrow_dest, (0, 255, 0), 3, tipLength=0.3, line_type=cv2.LINE_AA)
+                cv2.putText(frame_draw, "INSIDE / ENTER", (arrow_dest[0] + 10, arrow_dest[1] + 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
             
             cv2.putText(frame_draw, "Status: Ready to Save [S] or Reset [R]", (15, h - 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
@@ -146,13 +178,14 @@ class CalibrationApp:
         return frame_draw
 
     def run(self):
-        print("[*] Opening stream for calibration...")
+        window_name = "ROI Calibration" if self.mode == "roi" else "Tripwire Calibration"
+        print(f"[*] Opening stream for {self.mode} calibration...")
         if not self.cap.isOpened():
             print("[-] Error: Could not open camera stream.")
             return
             
-        cv2.namedWindow("Tripwire Calibration")
-        cv2.setMouseCallback("Tripwire Calibration", self.mouse_callback)
+        cv2.namedWindow(window_name)
+        cv2.setMouseCallback(window_name, self.mouse_callback)
 
         while True:
             ret, frame = self.cap.read()
@@ -168,7 +201,7 @@ class CalibrationApp:
             frame_draw = frame.copy()
             frame_draw = self.draw_overlays(frame_draw)
             
-            cv2.imshow("Tripwire Calibration", frame_draw)
+            cv2.imshow(window_name, frame_draw)
             key = cv2.waitKey(30) & 0xFF
             
             if key == ord('q') or key == 27: # Q or ESC
@@ -178,30 +211,34 @@ class CalibrationApp:
                 self.pt_A = None
                 self.pt_B = None
                 self.is_drawing = False
-                print("[*] Tripwire coordinates reset.")
+                print(f"[*] {self.mode.capitalize()} coordinates reset.")
             elif key == ord('s'): # Save
                 if self.pt_A and self.pt_B:
                     h, w, _ = frame.shape
-                    norm_line = normalize_coordinates(self.pt_A, self.pt_B, w, h)
-                    print(f"[*] Normalized line drawn: {norm_line}")
+                    sort_coords = (self.mode == "roi")
+                    norm_coords = normalize_coordinates(self.pt_A, self.pt_B, w, h, sort_coords=sort_coords)
+                    print(f"[*] Normalized coordinates: {norm_coords}")
                     
-                    success = update_config_file(self.config_json_path, norm_line)
+                    config_key = "motion_roi" if self.mode == "roi" else "tripwire_line"
+                    success = update_config_file(self.config_json_path, norm_coords, key=config_key)
                     if success:
-                        print(f"[+] Saved successfully to {self.config_json_path}!")
+                        print(f"[+] Saved successfully to {self.config_json_path} under '{config_key}'!")
                         break
                     else:
                         print(f"[-] Error: Could not update config file at {self.config_json_path}")
                 else:
-                    print("[-] Warning: Complete drawing the tripwire (Point A and B) before saving!")
+                    item_name = "ROI box" if self.mode == "roi" else "tripwire line"
+                    print(f"[-] Warning: Complete drawing the {item_name} (Point A and B) before saving!")
 
         self.cap.release()
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Visual Tripwire Calibration Tool")
+    parser = argparse.ArgumentParser(description="Visual Tripwire & ROI Calibration Tool")
     parser.add_argument("--rtsp", type=str, default=CONFIG.rtsp_url, help="RTSP stream URL")
     parser.add_argument("--config", type=str, default="config.json", help="Path to config JSON file")
+    parser.add_argument("--mode", type=str, choices=["tripwire", "roi"], default="tripwire", help="Calibration mode: 'tripwire' or 'roi'")
     args = parser.parse_args()
     
-    app = CalibrationApp(args.rtsp, config_json_path=args.config)
+    app = CalibrationApp(args.rtsp, config_json_path=args.config, mode=args.mode)
     app.run()
