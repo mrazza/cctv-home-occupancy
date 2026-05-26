@@ -32,6 +32,30 @@ def test_api_get_status_initial():
     assert data["current_occupancy"] == 0
     assert data["last_updated"] != ""  # Should be populated with initial insert timestamp
     assert data["last_processed_frame"] is None
+    assert data["system_state"] == "OFFLINE"
+
+
+def test_api_get_status_with_system_states():
+    """Verifies that the status API displays the correct system state when an orchestrator is running."""
+    from src.pipeline import OrchestratorRegistry
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.state = "IDLE"
+    
+    original_instance = OrchestratorRegistry.get_instance()
+    OrchestratorRegistry.set_instance(mock_orchestrator)
+    try:
+        response = client.get("/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["system_state"] == "IDLE"
+        
+        mock_orchestrator.state = "ACTIVE"
+        response2 = client.get("/status")
+        assert response2.status_code == 200
+        data2 = response2.json()
+        assert data2["system_state"] == "ACTIVE"
+    finally:
+        OrchestratorRegistry.set_instance(original_instance)
 
 
 def test_api_get_status_with_frame_processed():
