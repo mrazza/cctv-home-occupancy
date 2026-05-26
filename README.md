@@ -15,6 +15,7 @@ Exposes a FastAPI endpoint that can be directly queried or hooked into a Matterm
 - **Self-Correcting State Engine**: Maintains transactional SQLite DB representing household occupancy.
 - **Queryable API**: FastAPI allows Mattermost bots to query "Is anyone home?" or fetch snapshots of recent entry/exit events.
 - **Facial Crop Support**: Automatically isolates crops of faces/bodies for future facial identification.
+- **Configurable Event Webhooks**: Instantly dispatches POST requests to an array of URLs when a tripwire crossing event is detected.
 
 ---
 
@@ -92,6 +93,8 @@ You can customize runtime parameters using environment variables without editing
 | `CCTV_MOTION_COOLDOWN` | `150` | How many frames of silence before shutting off YOLO. |
 | `CCTV_DB_PATH` | `db/presence.db` | Path to the SQLite presence database. |
 | `CCTV_SNAPSHOT_DIR` | `snapshots` | Folder path where face/body crops are stored. |
+| `CCTV_WEBHOOK_URLS` | `[]` | Comma-separated list or JSON list of Webhook HTTP POST URLs to trigger. |
+| `CCTV_WEBHOOK_TIMEOUT` | `5` | Timeout in seconds for webhook requests. |
 
 ---
 
@@ -102,6 +105,26 @@ To start both the API server and the background camera-monitoring pipeline:
 source venv/bin/activate
 python run.py --rtsp "rtsp://localhost:8554/nest-cam"
 ```
+
+### Event Webhooks
+
+When a tripwire crossing event is detected, the pipeline automatically sends asynchronous `HTTP POST` requests to the configured `webhook_urls`.
+
+The webhook payload has the following structure:
+```json
+{
+  "event_id": 12,
+  "event_type": "ENTER",
+  "tracker_id": 3,
+  "confidence": 0.94,
+  "snapshot_path": "snapshots/enter_id3_20260526_173000_123456.jpg",
+  "is_someone_home": true,
+  "current_occupancy": 1,
+  "timestamp": "2026-05-26T17:30:00.123456"
+}
+```
+
+If any configured webhook fails (due to connection timeout, DNS resolution issues, or returning a non-2xx status code), the failure is caught and logged, allowing other webhooks and the main tracking pipeline to continue unimpeded.
 
 ### API Endpoints
 * **Get Current Status**: `GET http://localhost:8000/status`
