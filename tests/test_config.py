@@ -197,3 +197,38 @@ def test_load_config_motion_roi_env_invalid(monkeypatch, capsys):
     monkeypatch.setenv("CCTV_MOTION_ROI", "0.2, 0.3, 0.8")
     config = load_config()
     assert config.motion_roi is None
+
+
+def test_load_config_webhook_defaults(monkeypatch):
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    for key in list(os.environ.keys()):
+        if key.startswith("CCTV_"):
+            monkeypatch.delenv(key, raising=False)
+    config = load_config()
+    assert config.webhook_urls == []
+    assert config.webhook_timeout == 5
+
+
+def test_load_config_webhook_env_json(monkeypatch):
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    monkeypatch.setenv("CCTV_WEBHOOK_URLS", '["http://webhook1.internal", "http://webhook2.internal"]')
+    monkeypatch.setenv("CCTV_WEBHOOK_TIMEOUT", "10")
+    config = load_config()
+    assert config.webhook_urls == ["http://webhook1.internal", "http://webhook2.internal"]
+    assert config.webhook_timeout == 10
+
+
+def test_load_config_webhook_env_comma(monkeypatch):
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    monkeypatch.setenv("CCTV_WEBHOOK_URLS", "http://webhook1.internal, http://webhook2.internal")
+    config = load_config()
+    assert config.webhook_urls == ["http://webhook1.internal", "http://webhook2.internal"]
+
+
+def test_load_config_webhook_env_invalid_json(monkeypatch):
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    # This JSON parsing fails (missing bracket), so it falls back to comma parsing
+    monkeypatch.setenv("CCTV_WEBHOOK_URLS", '["http://webhook1.internal"')
+    config = load_config()
+    assert config.webhook_urls == ['["http://webhook1.internal"']
+

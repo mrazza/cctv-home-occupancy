@@ -42,6 +42,10 @@ class CameraConfig(BaseModel):
     
     # Snapshot Capture settings
     snapshot_dir: str = Field(default="snapshots", description="Directory to save person/face croppings")
+    
+    # Webhook Settings
+    webhook_urls: list[str] = Field(default_factory=list, description="List of webhook URLs to trigger on events")
+    webhook_timeout: int = Field(default=5, description="Timeout in seconds for the webhook requests")
 
 def load_config() -> CameraConfig:
     config_dict = {}
@@ -73,8 +77,19 @@ def load_config() -> CameraConfig:
         "CCTV_MOTION_COOLDOWN": ("motion_cooldown_frames", int),
         "CCTV_DB_PATH": ("db_path", str),
         "CCTV_SNAPSHOT_DIR": ("snapshot_dir", str),
+        "CCTV_WEBHOOK_TIMEOUT": ("webhook_timeout", int),
     }
     
+    # Handle CCTV_WEBHOOK_URLS env variable
+    webhook_urls_env = os.getenv("CCTV_WEBHOOK_URLS")
+    if webhook_urls_env is not None:
+        try:
+            parsed = json.loads(webhook_urls_env)
+            if isinstance(parsed, list):
+                config_dict["webhook_urls"] = [str(p) for p in parsed]
+        except Exception:
+            config_dict["webhook_urls"] = [x.strip() for x in webhook_urls_env.split(",") if x.strip()]
+
     # Handle CCTV_MOTION_ROI env variable
     motion_roi_env = os.getenv("CCTV_MOTION_ROI")
     if motion_roi_env is not None:

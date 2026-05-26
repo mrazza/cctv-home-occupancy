@@ -14,5 +14,7 @@
         [0.8, 0.5]
     ],
     "db_path": "db/presence.db",
-    "snapshot_dir": "snapshots"
+    "snapshot_dir": "snapshots",
+    "webhook_urls": [],
+    "webhook_timeout": 5
 }

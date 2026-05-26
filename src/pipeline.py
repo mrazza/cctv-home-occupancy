@@ -218,6 +218,40 @@ class PipelineOrchestrator:
                 )
                 logger.info(f"Successfully logged crossing event to DB (Event ID: {event_id})")
                 
+                # Check if we should trigger webhooks
+                if CONFIG.webhook_urls:
+                    try:
+                        state = self.db.get_current_state()
+                        payload = {
+                            "event_id": event_id,
+                            "event_type": event["event_type"],
+                            "tracker_id": event["tracker_id"],
+                            "confidence": event["confidence"],
+                            "snapshot_path": event["snapshot_path"],
+                            "is_someone_home": state["is_someone_home"],
+                            "current_occupancy": state["current_occupancy"],
+                            "timestamp": state["last_updated"]
+                        }
+                    except Exception as db_err:
+                        logger.error(f"Failed to fetch current state for webhook payload: {db_err}")
+                        payload = {
+                            "event_id": event_id,
+                            "event_type": event["event_type"],
+                            "tracker_id": event["tracker_id"],
+                            "confidence": event["confidence"],
+                            "snapshot_path": event["snapshot_path"],
+                            "is_someone_home": None,
+                            "current_occupancy": None,
+                            "timestamp": None
+                        }
+                    
+                    for url in CONFIG.webhook_urls:
+                        threading.Thread(
+                            target=self._dispatch_webhook_thread,
+                            args=(url, payload),
+                            daemon=True
+                        ).start()
+                
             return events
         except Exception:
             logger.exception("Unexpected error occurred while processing a single frame in the pipeline.")
@@ -286,6 +320,21 @@ class PipelineOrchestrator:
                 self.reader.stop()
                 self.reader = None
             logger.info("Continuous stream processing pipeline stopped.")
+
+    def _dispatch_webhook_thread(self, url: str, payload: Dict[str, Any]):
+        """Sends the HTTP POST request to the webhook URL in a background thread."""
+        import httpx
+        try:
+            logger.info(f"Dispatching event webhook to: {url}")
+            response = httpx.post(url, json=payload, timeout=CONFIG.webhook_timeout)
+            if response.status_code >= 400:
+                logger.warning(f"Webhook {url} returned non-success status code: {response.status_code}")
+            else:
+                logger.info(f"Webhook {url} successfully triggered.")
+        except httpx.RequestError as exc:
+            logger.error(f"An error occurred while requesting {exc.request.url!r}: {exc}")
+        except Exception as exc:
+            logger.exception(f"Unexpected error dispatching webhook {url}: {exc}")
 
     def stop(self):
         logger.info("Orchestrator stop requested.")

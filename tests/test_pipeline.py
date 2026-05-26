@@ -398,3 +398,160 @@ def test_threaded_video_reader_heartbeat(mock_video_capture):
     assert reader._frame_count >= 3
 
 
+def test_pipeline_webhook_success(db_manager, monkeypatch):
+    """Verifies that webhook urls are successfully called when events are processed."""
+    import httpx
+    from src.config import CameraConfig
+    
+    # Configure mock object tracker to return an event
+    mock_md = MagicMock(spec=MotionDetector)
+    mock_md.detect.return_value = True
+    
+    mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.track_histories = {}
+    mock_ot.process_frame.return_value = [{
+        "event_type": "ENTER",
+        "tracker_id": 1,
+        "confidence": 0.85,
+        "snapshot_path": "snapshots/test_snapshot.jpg"
+    }]
+    
+    # Inject CONFIG overrides using monkeypatch
+    monkeypatch.setattr("src.pipeline.CONFIG.webhook_urls", ["http://webhook1.test", "http://webhook2.test"])
+    monkeypatch.setattr("src.pipeline.CONFIG.webhook_timeout", 3)
+    
+    orchestrator = PipelineOrchestrator(
+        db_manager=db_manager,
+        motion_detector=mock_md,
+        object_tracker=mock_ot
+    )
+    
+    # We patch httpx.post
+    posted_payloads = []
+    posted_urls = []
+    posted_timeouts = []
+    
+    def mock_post(url, json, timeout):
+        posted_urls.append(url)
+        posted_payloads.append(json)
+        posted_timeouts.append(timeout)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        return mock_response
+        
+    with patch("httpx.post", side_effect=mock_post):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        events = orchestrator.process_frame(frame) if hasattr(orchestrator, "process_frame") else orchestrator.process_single_frame(frame)
+        
+        # Give threads a short time to finish since they are executed in separate threads
+        time.sleep(0.1)
+        
+    assert len(events) == 1
+    assert len(posted_urls) == 2
+    assert "http://webhook1.test" in posted_urls
+    assert "http://webhook2.test" in posted_urls
+    assert posted_timeouts == [3, 3]
+    
+    # Check payload contents
+    payload = posted_payloads[0]
+    assert payload["event_type"] == "ENTER"
+    assert payload["tracker_id"] == 1
+    assert payload["confidence"] == 0.85
+    assert payload["snapshot_path"] == "snapshots/test_snapshot.jpg"
+    assert payload["is_someone_home"] is True
+    assert payload["current_occupancy"] == 1
+    assert payload["timestamp"] is not None
+
+
+def test_pipeline_webhook_failure(db_manager, monkeypatch, caplog):
+    """Verifies that webhook errors (network error, timeout, non-200 status) are handled gracefully."""
+    import httpx
+    
+    mock_md = MagicMock(spec=MotionDetector)
+    mock_md.detect.return_value = True
+    
+    mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.track_histories = {}
+    mock_ot.process_frame.return_value = [{
+        "event_type": "LEAVE",
+        "tracker_id": 2,
+        "confidence": 0.90,
+        "snapshot_path": "snapshots/test_snapshot_2.jpg"
+    }]
+    
+    monkeypatch.setattr("src.pipeline.CONFIG.webhook_urls", ["http://webhook-fail-status.test", "http://webhook-fail-network.test", "http://webhook-fail-unexpected.test"])
+    
+    orchestrator = PipelineOrchestrator(
+        db_manager=db_manager,
+        motion_detector=mock_md,
+        object_tracker=mock_ot
+    )
+    
+    def mock_post(url, json, timeout):
+        if "fail-status" in url:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 500
+            return mock_resp
+        elif "fail-network" in url:
+            raise httpx.RequestError("Network error", request=MagicMock())
+        else:
+            raise ValueError("Unexpected exception")
+            
+    with caplog.at_level(logging.WARNING), patch("httpx.post", side_effect=mock_post):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        orchestrator.process_single_frame(frame)
+        time.sleep(0.1)
+        
+    # Check that appropriate warning/error messages are logged
+    log_texts = [record.message for record in caplog.records]
+    assert any("returned non-success status code" in text for text in log_texts)
+    assert any("An error occurred while requesting" in text for text in log_texts)
+    assert any("Unexpected error dispatching webhook" in text for text in log_texts)
+
+
+def test_pipeline_webhook_db_failure(db_manager, monkeypatch):
+    """Verifies that webhook payload is built with fallback values if database state retrieval fails."""
+    mock_md = MagicMock(spec=MotionDetector)
+    mock_md.detect.return_value = True
+    
+    mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.track_histories = {}
+    mock_ot.process_frame.return_value = [{
+        "event_type": "ENTER",
+        "tracker_id": 1,
+        "confidence": 0.85,
+        "snapshot_path": "snapshots/test_snapshot.jpg"
+    }]
+    
+    monkeypatch.setattr("src.pipeline.CONFIG.webhook_urls", ["http://webhook1.test"])
+    
+    orchestrator = PipelineOrchestrator(
+        db_manager=db_manager,
+        motion_detector=mock_md,
+        object_tracker=mock_ot
+    )
+    
+    # Mock self.db.get_current_state to raise an exception
+    orchestrator.db.get_current_state = MagicMock(side_effect=Exception("DB error"))
+    
+    posted_payloads = []
+    def mock_post(url, json, timeout):
+        posted_payloads.append(json)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        return mock_response
+        
+    with patch("httpx.post", side_effect=mock_post):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        orchestrator.process_single_frame(frame)
+        time.sleep(0.1)
+        
+    assert len(posted_payloads) == 1
+    payload = posted_payloads[0]
+    assert payload["event_type"] == "ENTER"
+    assert payload["is_someone_home"] is None
+    assert payload["current_occupancy"] is None
+    assert payload["timestamp"] is None
+
+
+
