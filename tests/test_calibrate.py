@@ -1,7 +1,7 @@
 import os
 import json
 import pytest
-from calibrate import calculate_arrow_endpoint, normalize_coordinates, update_config_file
+from calibrate import calculate_arrow_endpoint, normalize_coordinates, normalize_polygon, update_config_file
 
 def test_calculate_arrow_endpoint():
     A = (100, 100)
@@ -38,6 +38,16 @@ def test_normalize_coordinates_sorted():
 def test_normalize_coordinates_invalid():
     with pytest.raises(ValueError):
         normalize_coordinates((0, 0), (1, 1), 0, 100)
+
+def test_normalize_polygon():
+    pts = [(100, 200), (300, 400), (500, 600)]
+    width, height = 1000, 1000
+    norm = normalize_polygon(pts, width, height)
+    assert norm == [(0.1, 0.2), (0.3, 0.4), (0.5, 0.6)]
+
+def test_normalize_polygon_invalid():
+    with pytest.raises(ValueError):
+        normalize_polygon([(1, 1)], 0, 100)
 
 def test_update_config_file(temp_dir):
     json_path = os.path.join(temp_dir, "test_config.json")

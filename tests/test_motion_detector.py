@@ -75,9 +75,30 @@ def test_motion_detector_with_roi():
     assert detector.detect(frame_motion_inside) is True
 
 
+def test_motion_detector_with_polygon_roi():
+    # Set ROI to a triangular polygon: top-left corner region
+    detector = MotionDetector(threshold=0.01, min_contour_area=10, alpha=0.5, roi=[(0.0, 0.0), (0.8, 0.0), (0.0, 0.8)])
+    
+    # 1. Init background with black frame
+    frame_black = np.zeros((100, 100, 3), dtype=np.uint8)
+    detector.detect(frame_black)
+    
+    # 2. Introduce motion OUTSIDE of the triangular ROI (at bottom-right corner 80:100, 80:100)
+    frame_motion_outside = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame_motion_outside[80:100, 80:100, :] = 255
+    # Should NOT register motion
+    assert detector.detect(frame_motion_outside) is False
+    
+    # 3. Introduce motion INSIDE of the triangular ROI (at top-left 10:20, 10:20)
+    frame_motion_inside = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame_motion_inside[10:20, 10:20, :] = 255
+    # Should register motion
+    assert detector.detect(frame_motion_inside) is True
+
+
 def test_motion_detector_invalid_roi():
-    # Small/invalid ROI should fall back to entire frame
-    detector = MotionDetector(threshold=0.01, min_contour_area=10, alpha=0.5, roi=[(0.0, 0.0), (0.01, 0.01)])
+    # Empty or short ROI list should fall back to entire frame
+    detector = MotionDetector(threshold=0.01, min_contour_area=10, alpha=0.5, roi=[])
     frame_black = np.zeros((100, 100, 3), dtype=np.uint8)
     detector.detect(frame_black)
     

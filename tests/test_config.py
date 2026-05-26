@@ -172,6 +172,20 @@ def test_load_config_motion_roi_env_comma_list(monkeypatch):
     assert config.motion_roi == [(0.2, 0.3), (0.8, 0.9)]
 
 
+def test_load_config_motion_roi_polygon_env_json(monkeypatch):
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    monkeypatch.setenv("CCTV_MOTION_ROI", "[[0.1, 0.1], [0.5, 0.1], [0.5, 0.5]]")
+    config = load_config()
+    assert config.motion_roi == [(0.1, 0.1), (0.5, 0.1), (0.5, 0.5)]
+
+
+def test_load_config_motion_roi_polygon_env_comma_list(monkeypatch):
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    monkeypatch.setenv("CCTV_MOTION_ROI", "0.1, 0.1, 0.5, 0.1, 0.5, 0.5")
+    config = load_config()
+    assert config.motion_roi == [(0.1, 0.1), (0.5, 0.1), (0.5, 0.5)]
+
+
 def test_load_config_motion_roi_env_invalid(monkeypatch, capsys):
     monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
     monkeypatch.setenv("CCTV_MOTION_ROI", "invalid_format")

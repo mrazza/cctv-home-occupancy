@@ -11,42 +11,55 @@ class MotionDetector:
             threshold: Fraction of frame pixels that must be different to classify as motion (0.0 to 1.0)
             min_contour_area: Minimum area in pixels of a contour to count as moving object
             alpha: Accumulation rate for the running average background model (0.0 to 1.0)
-            roi: Optional normalized coordinates [(x1, y1), (x2, y2)] representing the bounding box for motion detection.
+            roi: Optional normalized coordinates [(x1, y1), (x2, y2), ...] representing the bounding box or polygon for motion detection.
         """
         self.threshold = threshold
         self.min_contour_area = min_contour_area
         self.alpha = alpha
         self.roi = roi
         self.background_accumulator: Optional[np.ndarray] = None
+        self._mask_cache: Optional[np.ndarray] = None
+        self._roi_area: Optional[int] = None
 
     def reset(self):
         """Resets the accumulated background model."""
         self.background_accumulator = None
+        self._mask_cache = None
+        self._roi_area = None
 
     def detect(self, frame: np.ndarray) -> bool:
         """
         Processes a frame and returns True if motion is detected, updating the background.
         """
-        # Crop to Region of Interest (ROI) if specified
-        if self.roi is not None and len(self.roi) == 2:
-            h, w, _ = frame.shape
-            x1 = int(self.roi[0][0] * w)
-            y1 = int(self.roi[0][1] * h)
-            x2 = int(self.roi[1][0] * w)
-            y2 = int(self.roi[1][1] * h)
-            
-            # Ensure coordinates are within image boundaries and valid
-            x_min = max(0, min(x1, x2))
-            x_max = min(w, max(x1, x2))
-            y_min = max(0, min(y1, y2))
-            y_max = min(h, max(y1, y2))
-            
-            if x_max - x_min > 10 and y_max - y_min > 10:
-                frame = frame[y_min:y_max, x_min:x_max]
+        h, w, _ = frame.shape
+        
+        # Apply binary mask if ROI is specified
+        if self.roi is not None and len(self.roi) >= 2:
+            if self._mask_cache is None or self._mask_cache.shape[:2] != (h, w):
+                mask = np.zeros((h, w), dtype=np.uint8)
+                if len(self.roi) == 2:
+                    # Bounding box / rectangle
+                    x1 = int(self.roi[0][0] * w)
+                    y1 = int(self.roi[0][1] * h)
+                    x2 = int(self.roi[1][0] * w)
+                    y2 = int(self.roi[1][1] * h)
+                    x_min, x_max = sorted([x1, x2])
+                    y_min, y_max = sorted([y1, y2])
+                    cv2.rectangle(mask, (x_min, y_min), (x_max, y_max), 255, -1)
+                else:
+                    # Polygon (3 or more vertices)
+                    pts = np.array([[int(p[0] * w), int(p[1] * h)] for p in self.roi], dtype=np.int32)
+                    cv2.fillPoly(mask, [pts], 255)
+                self._mask_cache = mask
+                self._roi_area = max(1, np.count_nonzero(mask))
 
         # Convert to grayscale and blur to remove high frequency noise
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (21, 21), 0)
+
+        # Apply mask on the blurred frame to zero out regions outside ROI
+        if self.roi is not None and len(self.roi) >= 2:
+            blurred = cv2.bitwise_and(blurred, blurred, mask=self._mask_cache)
 
         # Initialize background model with first frame
         if self.background_accumulator is None:
@@ -76,7 +89,11 @@ class MotionDetector:
                 total_motion_area += area
 
         # Calculate fraction of motion pixels
-        total_pixels = frame.shape[0] * frame.shape[1]
+        if self.roi is not None and len(self.roi) >= 2:
+            total_pixels = self._roi_area
+        else:
+            total_pixels = h * w
+            
         motion_fraction = total_motion_area / total_pixels
 
-        return motion_fraction >= self.threshold
+        return bool(motion_fraction >= self.threshold)

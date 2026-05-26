@@ -80,13 +80,13 @@ def load_config() -> CameraConfig:
     if motion_roi_env is not None:
         try:
             parsed = json.loads(motion_roi_env)
-            if isinstance(parsed, list) and len(parsed) == 2:
+            if isinstance(parsed, list):
                 config_dict["motion_roi"] = [(float(p[0]), float(p[1])) for p in parsed]
         except Exception:
             try:
                 floats = [float(x.strip()) for x in motion_roi_env.split(",") if x.strip()]
-                if len(floats) == 4:
-                    config_dict["motion_roi"] = [(floats[0], floats[1]), (floats[2], floats[3])]
+                if len(floats) >= 4 and len(floats) % 2 == 0:
+                    config_dict["motion_roi"] = [(floats[i], floats[i+1]) for i in range(0, len(floats), 2)]
             except Exception as e:
                 print(f"[-] Warning: Failed to parse CCTV_MOTION_ROI env: {e}")
 

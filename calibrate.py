@@ -58,6 +58,14 @@ def normalize_coordinates(A: Tuple[int, int], B: Tuple[int, int], width: int, he
         (round(B[0] / width, 4), round(B[1] / height, 4))
     ]
 
+def normalize_polygon(pts: List[Tuple[int, int]], width: int, height: int) -> List[Tuple[float, float]]:
+    """
+    Converts raw pixel coordinates of a polygon to normalized floats between 0.0 and 1.0.
+    """
+    if width <= 0 or height <= 0:
+        raise ValueError("Width and height must be positive values")
+    return [(round(pt[0] / width, 4), round(pt[1] / height, 4)) for pt in pts]
+
 def update_config_file(config_json_path: str, coordinates: List[Tuple[float, float]], key: str = "tripwire_line") -> bool:
     """
     Safely saves the coordinates to config.json under the specified key.
@@ -90,36 +98,45 @@ class CalibrationApp:
         self.cap = cv2.VideoCapture(stream_url)
         self.frame = None
         
-        # Point/Line/Box State
-        self.pt_A = None
-        self.pt_B = None
+        # State variables
+        self.pt_A = None  # Tripwire Point A
+        self.pt_B = None  # Tripwire Point B
+        self.pts = []     # Polygon points
+        self.polygon_closed = False
         self.mouse_pos = None
         self.is_drawing = False
 
     def mouse_callback(self, event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            if not self.is_drawing and self.pt_A is None:
-                # First click: Point A
-                self.pt_A = (x, y)
-                self.is_drawing = True
-            elif self.is_drawing:
-                # Second click: Point B
-                self.pt_B = (x, y)
-                self.is_drawing = False
-                
-        elif event == cv2.EVENT_MOUSEMOVE:
-            self.mouse_pos = (x, y)
+        if self.mode == "roi":
+            if event == cv2.EVENT_LBUTTONDOWN:
+                if not self.polygon_closed:
+                    self.pts.append((x, y))
+            elif event == cv2.EVENT_MOUSEMOVE:
+                self.mouse_pos = (x, y)
+        else:
+            if event == cv2.EVENT_LBUTTONDOWN:
+                if not self.is_drawing and self.pt_A is None:
+                    # First click: Point A
+                    self.pt_A = (x, y)
+                    self.is_drawing = True
+                elif self.is_drawing:
+                    # Second click: Point B
+                    self.pt_B = (x, y)
+                    self.is_drawing = False
+                    
+            elif event == cv2.EVENT_MOUSEMOVE:
+                self.mouse_pos = (x, y)
 
     def draw_overlays(self, frame_draw) -> np.ndarray:
         h, w, _ = frame_draw.shape
         
         # Display instructions
         if self.mode == "roi":
-            cv2.putText(frame_draw, "ROI CALIBRATION MODE", (15, 30),
+            cv2.putText(frame_draw, "ROI POLYGON CALIBRATION MODE", (15, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame_draw, "Left click for corner A, again for opposite corner B", (15, 55),
+            cv2.putText(frame_draw, "Left click to add vertices sequentially.", (15, 55),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame_draw, "Press [S] to Save | [R] to Reset | [Q] to Quit", (15, 80),
+            cv2.putText(frame_draw, "Press [Enter] to Close Polygon | [S] to Save | [R] to Reset | [Q] to Quit", (15, 80),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
         else:
             cv2.putText(frame_draw, "TRIPWIRE CALIBRATION MODE", (15, 30),
@@ -129,32 +146,53 @@ class CalibrationApp:
             cv2.putText(frame_draw, "Press [S] to Save | [R] to Reset | [Q] to Quit", (15, 80),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
         
-        # Draw status
-        if self.pt_A is None:
-            cv2.putText(frame_draw, "Status: Click to place Point A", (15, h - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2, cv2.LINE_AA)
-        elif self.is_drawing and self.mouse_pos:
-            # Drawing preview
-            if self.mode == "roi":
-                cv2.rectangle(frame_draw, self.pt_A, self.mouse_pos, (0, 255, 255), 2, cv2.LINE_AA)
+        # Draw status / elements
+        if self.mode == "roi":
+            num_pts = len(self.pts)
+            if num_pts > 0:
+                # Draw lines between consecutive points
+                for i in range(num_pts - 1):
+                    cv2.line(frame_draw, self.pts[i], self.pts[i+1], (0, 255, 255), 2, cv2.LINE_AA)
+                    cv2.circle(frame_draw, self.pts[i], 5, (0, 0, 255), -1)
+                cv2.circle(frame_draw, self.pts[-1], 5, (0, 0, 255), -1)
+                
+                if self.polygon_closed:
+                    # Draw closing line
+                    cv2.line(frame_draw, self.pts[-1], self.pts[0], (0, 255, 0), 2, cv2.LINE_AA)
+                    # Semi-transparent overlay inside polygon
+                    overlay = frame_draw.copy()
+                    pts_arr = np.array(self.pts, dtype=np.int32)
+                    cv2.fillPoly(overlay, [pts_arr], (0, 255, 0))
+                    cv2.addWeighted(overlay, 0.15, frame_draw, 0.85, 0, frame_draw)
+                    # Highlight green vertices
+                    for p in self.pts:
+                        cv2.circle(frame_draw, p, 5, (0, 255, 0), -1)
+                    cv2.putText(frame_draw, "Status: Polygon Closed. Press [S] to Save or [R] to Reset", (15, h - 20),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+                else:
+                    # Draw preview line from last point to mouse
+                    if self.mouse_pos:
+                        cv2.line(frame_draw, self.pts[-1], self.mouse_pos, (0, 255, 255), 2, cv2.LINE_AA)
+                        # Also draw preview closing line from mouse to first point
+                        cv2.line(frame_draw, self.mouse_pos, self.pts[0], (0, 100, 255), 1, cv2.LINE_AA)
+                    
+                    status_text = f"Status: {num_pts} point(s) placed. Click next vertex, or press [Enter] to Close (requires >= 3 pts)"
+                    cv2.putText(frame_draw, status_text, (15, h - 20),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2, cv2.LINE_AA)
             else:
+                cv2.putText(frame_draw, "Status: Left click to place first vertex", (15, h - 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2, cv2.LINE_AA)
+        else:
+            if self.pt_A is None:
+                cv2.putText(frame_draw, "Status: Click to place Point A", (15, h - 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2, cv2.LINE_AA)
+            elif self.is_drawing and self.mouse_pos:
+                # Drawing preview
                 cv2.line(frame_draw, self.pt_A, self.mouse_pos, (255, 100, 0), 2, cv2.LINE_AA)
-            cv2.circle(frame_draw, self.pt_A, 5, (0, 0, 255), -1)
-            cv2.putText(frame_draw, "Status: Click to place Point B", (15, h - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
-        elif self.pt_B:
-            if self.mode == "roi":
-                # Draw the final rectangle
-                overlay = frame_draw.copy()
-                cv2.rectangle(overlay, self.pt_A, self.pt_B, (0, 255, 0), -1)
-                cv2.addWeighted(overlay, 0.15, frame_draw, 0.85, 0, frame_draw)
-                # Outer border
-                cv2.rectangle(frame_draw, self.pt_A, self.pt_B, (0, 255, 0), 2, cv2.LINE_AA)
                 cv2.circle(frame_draw, self.pt_A, 5, (0, 0, 255), -1)
-                cv2.circle(frame_draw, self.pt_B, 5, (255, 0, 0), -1)
-                cv2.putText(frame_draw, "ROI Bounds", (min(self.pt_A[0], self.pt_B[0]) + 5, min(self.pt_A[1], self.pt_B[1]) + 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
-            else:
+                cv2.putText(frame_draw, "Status: Click to place Point B", (15, h - 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
+            elif self.pt_B:
                 # Locked Tripwire
                 cv2.line(frame_draw, self.pt_A, self.pt_B, (255, 0, 0), 3, cv2.LINE_AA)
                 cv2.circle(frame_draw, self.pt_A, 6, (0, 0, 255), -1)
@@ -171,10 +209,10 @@ class CalibrationApp:
                 cv2.arrowedLine(frame_draw, mid, arrow_dest, (0, 255, 0), 3, tipLength=0.3, line_type=cv2.LINE_AA)
                 cv2.putText(frame_draw, "INSIDE / ENTER", (arrow_dest[0] + 10, arrow_dest[1] + 5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
-            
-            cv2.putText(frame_draw, "Status: Ready to Save [S] or Reset [R]", (15, h - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
-                        
+                
+                cv2.putText(frame_draw, "Status: Ready to Save [S] or Reset [R]", (15, h - 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+                            
         return frame_draw
 
     def run(self):
@@ -210,25 +248,46 @@ class CalibrationApp:
             elif key == ord('r'): # Reset
                 self.pt_A = None
                 self.pt_B = None
+                self.pts = []
+                self.polygon_closed = False
                 self.is_drawing = False
                 print(f"[*] {self.mode.capitalize()} coordinates reset.")
-            elif key == ord('s'): # Save
-                if self.pt_A and self.pt_B:
-                    h, w, _ = frame.shape
-                    sort_coords = (self.mode == "roi")
-                    norm_coords = normalize_coordinates(self.pt_A, self.pt_B, w, h, sort_coords=sort_coords)
-                    print(f"[*] Normalized coordinates: {norm_coords}")
-                    
-                    config_key = "motion_roi" if self.mode == "roi" else "tripwire_line"
-                    success = update_config_file(self.config_json_path, norm_coords, key=config_key)
-                    if success:
-                        print(f"[+] Saved successfully to {self.config_json_path} under '{config_key}'!")
-                        break
+            elif key in (13, 10): # Enter
+                if self.mode == "roi":
+                    if len(self.pts) >= 3:
+                        self.polygon_closed = True
+                        print("[*] Polygon closed.")
                     else:
-                        print(f"[-] Error: Could not update config file at {self.config_json_path}")
+                        print("[-] Warning: Polygon requires at least 3 vertices to close!")
+            elif key == ord('s'): # Save
+                if self.mode == "roi":
+                    if self.polygon_closed and len(self.pts) >= 3:
+                        h, w, _ = frame.shape
+                        norm_coords = normalize_polygon(self.pts, w, h)
+                        print(f"[*] Normalized coordinates: {norm_coords}")
+                        
+                        success = update_config_file(self.config_json_path, norm_coords, key="motion_roi")
+                        if success:
+                            print(f"[+] Saved successfully to {self.config_json_path} under 'motion_roi'!")
+                            break
+                        else:
+                            print(f"[-] Error: Could not update config file at {self.config_json_path}")
+                    else:
+                        print("[-] Warning: Polygon must be closed with [Enter] before saving!")
                 else:
-                    item_name = "ROI box" if self.mode == "roi" else "tripwire line"
-                    print(f"[-] Warning: Complete drawing the {item_name} (Point A and B) before saving!")
+                    if self.pt_A and self.pt_B:
+                        h, w, _ = frame.shape
+                        norm_coords = normalize_coordinates(self.pt_A, self.pt_B, w, h)
+                        print(f"[*] Normalized coordinates: {norm_coords}")
+                        
+                        success = update_config_file(self.config_json_path, norm_coords, key="tripwire_line")
+                        if success:
+                            print(f"[+] Saved successfully to {self.config_json_path} under 'tripwire_line'!")
+                            break
+                        else:
+                            print(f"[-] Error: Could not update config file at {self.config_json_path}")
+                    else:
+                        print("[-] Warning: Complete drawing the tripwire line (Point A and B) before saving!")
 
         self.cap.release()
         cv2.destroyAllWindows()

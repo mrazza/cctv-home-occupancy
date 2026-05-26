@@ -66,18 +66,18 @@ def main():
         try:
             # Try to parse as JSON
             parsed = json.loads(args.roi)
-            if isinstance(parsed, list) and len(parsed) == 2:
+            if isinstance(parsed, list):
                 motion_roi = [(float(p[0]), float(p[1])) for p in parsed]
                 logger.info(f"Overriding motion ROI from CLI: {motion_roi}")
         except Exception:
             try:
                 # Fallback to comma-separated floats
                 floats = [float(x.strip()) for x in args.roi.split(",") if x.strip()]
-                if len(floats) == 4:
-                    motion_roi = [(floats[0], floats[1]), (floats[2], floats[3])]
+                if len(floats) >= 4 and len(floats) % 2 == 0:
+                    motion_roi = [(floats[i], floats[i+1]) for i in range(0, len(floats), 2)]
                     logger.info(f"Overriding motion ROI from CLI list: {motion_roi}")
                 else:
-                    logger.error("Error: Motion ROI CLI format must be x1,y1,x2,y2")
+                    logger.error("Error: Motion ROI CLI format must contain even number of coordinates (x1,y1,x2,y2,...)")
                     sys.exit(1)
             except Exception as e:
                 logger.error(f"Error parsing motion ROI parameter: {e}")
