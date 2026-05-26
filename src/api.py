@@ -145,6 +145,7 @@ def calculate_arrow_endpoint(A: tuple[int, int], B: tuple[int, int], length: flo
 @app.get("/frame", tags=["Stream"])
 def get_current_frame(
     draw_tripwire: bool = Query(default=False, description="Draw the tripwire line and inside direction vector on the frame"),
+    draw_roi: bool = Query(default=False, description="Draw the motion detection Region of Interest (ROI) polygon/bounding box on the frame"),
     width: Optional[int] = Query(default=None, ge=1, description="Optional target width for resizing"),
     height: Optional[int] = Query(default=None, ge=1, description="Optional target height for resizing")
 ):
@@ -181,6 +182,35 @@ def get_current_frame(
         cv2.arrowedLine(frame, mid, arrow_dest, (0, 255, 0), 3, tipLength=0.3, line_type=cv2.LINE_AA)
         cv2.putText(frame, "INSIDE / ENTER", (arrow_dest[0] + 10, arrow_dest[1] + 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
+
+    # 3b. Optional: Draw ROI Overlay
+    if draw_roi and CONFIG.motion_roi is not None and len(CONFIG.motion_roi) >= 2:
+        h, w, _ = frame.shape
+        if len(CONFIG.motion_roi) == 2:
+            # Rectangle / bounding box ROI
+            rx1 = int(CONFIG.motion_roi[0][0] * w)
+            ry1 = int(CONFIG.motion_roi[0][1] * h)
+            rx2 = int(CONFIG.motion_roi[1][0] * w)
+            ry2 = int(CONFIG.motion_roi[1][1] * h)
+            x_min, x_max = sorted([rx1, rx2])
+            y_min, y_max = sorted([ry1, ry2])
+            
+            # Semi-transparent overlay inside rectangle
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (x_min, y_min), (x_max, y_max), (0, 255, 255), -1)
+            cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
+            # Outline
+            cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 255), 2, cv2.LINE_AA)
+        else:
+            # Polygon ROI
+            pts = np.array([[int(p[0] * w), int(p[1] * h)] for p in CONFIG.motion_roi], dtype=np.int32)
+            
+            # Semi-transparent overlay inside polygon
+            overlay = frame.copy()
+            cv2.fillPoly(overlay, [pts], (0, 255, 255))
+            cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
+            # Outline
+            cv2.polylines(frame, [pts], True, (0, 255, 255), 2, cv2.LINE_AA)
 
     # 4. Optional: Resize frame
     if width or height:

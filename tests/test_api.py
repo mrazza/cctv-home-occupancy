@@ -213,6 +213,42 @@ def test_api_get_frame_with_tripwire():
     assert decoded_img.shape == (480, 640, 3)
 
 
+def test_api_get_frame_with_roi():
+    """Verifies that drawing the ROI overlays (both rect and poly) works correctly and returns valid images."""
+    import numpy as np
+    from src.pipeline import FrameRegistry
+    import src.api as api
+
+    dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    FrameRegistry.set_frame(dummy_frame)
+
+    # 1. Bounding box / rectangle ROI
+    original_roi = api.CONFIG.motion_roi
+    api.CONFIG.motion_roi = [(0.25, 0.25), (0.75, 0.75)]
+    try:
+        response = client.get("/frame?draw_roi=true")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/jpeg"
+
+        img_data = np.frombuffer(response.content, dtype=np.uint8)
+        decoded_img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+        assert decoded_img is not None
+        assert decoded_img.shape == (480, 640, 3)
+
+        # 2. Polygon ROI
+        api.CONFIG.motion_roi = [(0.1, 0.1), (0.6, 0.1), (0.5, 0.6)]
+        response = client.get("/frame?draw_roi=true")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/jpeg"
+
+        img_data = np.frombuffer(response.content, dtype=np.uint8)
+        decoded_img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+        assert decoded_img is not None
+        assert decoded_img.shape == (480, 640, 3)
+    finally:
+        api.CONFIG.motion_roi = original_roi
+
+
 def test_api_get_frame_with_resizing():
     """Verifies that the retrieved frame can be resized based on query parameters."""
     import numpy as np
