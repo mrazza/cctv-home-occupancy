@@ -28,6 +28,8 @@ def main():
     parser.add_argument("--rtsp", type=str, default=CONFIG.rtsp_url, help="RTSP stream URL")
     parser.add_argument("--tripwire", type=str, default=None, 
                         help="Coordinates of the tripwire as a comma-separated list of four floats (x1,y1,x2,y2) or JSON string")
+    parser.add_argument("--roi", type=str, default=None,
+                        help="Coordinates of the motion detection ROI as a comma-separated list of four floats (x1,y1,x2,y2) or JSON string")
     parser.add_argument("--host", type=str, default=CONFIG.host, help="FastAPI host")
     parser.add_argument("--port", type=int, default=CONFIG.port, help="FastAPI port")
     parser.add_argument("--no-api", action="store_true", help="Disable the FastAPI server")
@@ -58,6 +60,29 @@ def main():
                 logger.error(f"Error parsing tripwire parameter: {e}")
                 sys.exit(1)
                 
+    # Override motion ROI if provided via CLI
+    motion_roi = CONFIG.motion_roi
+    if args.roi:
+        try:
+            # Try to parse as JSON
+            parsed = json.loads(args.roi)
+            if isinstance(parsed, list) and len(parsed) == 2:
+                motion_roi = [(float(p[0]), float(p[1])) for p in parsed]
+                logger.info(f"Overriding motion ROI from CLI: {motion_roi}")
+        except Exception:
+            try:
+                # Fallback to comma-separated floats
+                floats = [float(x.strip()) for x in args.roi.split(",") if x.strip()]
+                if len(floats) == 4:
+                    motion_roi = [(floats[0], floats[1]), (floats[2], floats[3])]
+                    logger.info(f"Overriding motion ROI from CLI list: {motion_roi}")
+                else:
+                    logger.error("Error: Motion ROI CLI format must be x1,y1,x2,y2")
+                    sys.exit(1)
+            except Exception as e:
+                logger.error(f"Error parsing motion ROI parameter: {e}")
+                sys.exit(1)
+
     # Initialize DB
     logger.info(f"Initializing presence database at: {CONFIG.db_path}")
     db_manager = DatabaseManager(CONFIG.db_path)
@@ -69,8 +94,16 @@ def main():
         # Pass custom tripwire_line override to object tracker
         from src.object_tracker import ObjectTracker
         tracker = ObjectTracker(tripwire_line=tripwire_line, snapshot_dir=CONFIG.snapshot_dir)
+        from src.motion_detector import MotionDetector
+        detector = MotionDetector(
+            threshold=CONFIG.motion_threshold,
+            min_contour_area=CONFIG.motion_min_contour_area,
+            alpha=CONFIG.background_alpha,
+            roi=motion_roi
+        )
         orchestrator = PipelineOrchestrator(
             db_manager=db_manager, 
+            motion_detector=detector,
             object_tracker=tracker,
             fps_limit=CONFIG.fps_limit,
             cooldown_frames=CONFIG.motion_cooldown_frames

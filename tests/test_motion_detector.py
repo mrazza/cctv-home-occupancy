@@ -52,3 +52,35 @@ def test_motion_detector_reset():
     
     detector.reset()
     assert detector.background_accumulator is None
+
+
+def test_motion_detector_with_roi():
+    # Set ROI to center 50%
+    detector = MotionDetector(threshold=0.01, min_contour_area=10, alpha=0.5, roi=[(0.25, 0.25), (0.75, 0.75)])
+    
+    # 1. Init background with black frame
+    frame_black = np.zeros((100, 100, 3), dtype=np.uint8)
+    detector.detect(frame_black)
+    
+    # 2. Introduce motion OUTSIDE of the ROI (at top-left 0:20, 0:20)
+    frame_motion_outside = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame_motion_outside[0:20, 0:20, :] = 255
+    # Should NOT register motion because it's outside the ROI
+    assert detector.detect(frame_motion_outside) is False
+    
+    # 3. Introduce motion INSIDE of the ROI (at center 45:55, 45:55)
+    frame_motion_inside = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame_motion_inside[45:55, 45:55, :] = 255
+    # Should register motion
+    assert detector.detect(frame_motion_inside) is True
+
+
+def test_motion_detector_invalid_roi():
+    # Small/invalid ROI should fall back to entire frame
+    detector = MotionDetector(threshold=0.01, min_contour_area=10, alpha=0.5, roi=[(0.0, 0.0), (0.01, 0.01)])
+    frame_black = np.zeros((100, 100, 3), dtype=np.uint8)
+    detector.detect(frame_black)
+    
+    frame_motion = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame_motion[45:55, 45:55, :] = 255
+    assert detector.detect(frame_motion) is True

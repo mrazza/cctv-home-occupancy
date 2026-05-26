@@ -24,6 +24,10 @@ class CameraConfig(BaseModel):
     motion_min_contour_area: int = Field(default=500, description="Minimum contour area for motion detection")
     background_alpha: float = Field(default=0.05, description="Accumulator update speed for background subtraction")
     motion_cooldown_frames: int = Field(default=150, description="Number of idle frames before returning to fast motion detection stage")
+    motion_roi: Optional[list[tuple[float, float]]] = Field(
+        default=None,
+        description="Region of interest for motion detection as [(x1, y1), (x2, y2)] normalized between 0.0 and 1.0. If None, the entire frame is used."
+    )
 
     # Line Crossing Parameters (Slow Stage)
     # Tripwire Line: list of tuples [(x1, y1), (x2, y2)] representing the door threshold.
@@ -71,6 +75,21 @@ def load_config() -> CameraConfig:
         "CCTV_SNAPSHOT_DIR": ("snapshot_dir", str),
     }
     
+    # Handle CCTV_MOTION_ROI env variable
+    motion_roi_env = os.getenv("CCTV_MOTION_ROI")
+    if motion_roi_env is not None:
+        try:
+            parsed = json.loads(motion_roi_env)
+            if isinstance(parsed, list) and len(parsed) == 2:
+                config_dict["motion_roi"] = [(float(p[0]), float(p[1])) for p in parsed]
+        except Exception:
+            try:
+                floats = [float(x.strip()) for x in motion_roi_env.split(",") if x.strip()]
+                if len(floats) == 4:
+                    config_dict["motion_roi"] = [(floats[0], floats[1]), (floats[2], floats[3])]
+            except Exception as e:
+                print(f"[-] Warning: Failed to parse CCTV_MOTION_ROI env: {e}")
+
     for env_var, (config_key, val_type) in env_mappings.items():
         val = os.getenv(env_var)
         if val is not None:

@@ -138,7 +138,12 @@ class PipelineOrchestrator:
         Orchestrates the "Fast & Slow" pipeline switching between low-CPU motion detection and high-accuracy YOLO.
         """
         self.db = db_manager
-        self.motion_detector = motion_detector or MotionDetector()
+        self.motion_detector = motion_detector or MotionDetector(
+            threshold=CONFIG.motion_threshold,
+            min_contour_area=CONFIG.motion_min_contour_area,
+            alpha=CONFIG.background_alpha,
+            roi=CONFIG.motion_roi
+        )
         self.object_tracker = object_tracker or ObjectTracker()
         self.cooldown_frames = cooldown_frames
         self.fps_limit = fps_limit

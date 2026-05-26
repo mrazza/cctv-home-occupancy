@@ -156,3 +156,30 @@ def test_load_config_trigger_mode_env(monkeypatch):
     assert config.trigger_mode == "event"
     assert config.event_stream_duration == 60
 
+
+
+def test_load_config_motion_roi_env_json(monkeypatch):
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    monkeypatch.setenv("CCTV_MOTION_ROI", "[[0.2, 0.3], [0.8, 0.9]]")
+    config = load_config()
+    assert config.motion_roi == [(0.2, 0.3), (0.8, 0.9)]
+
+
+def test_load_config_motion_roi_env_comma_list(monkeypatch):
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    monkeypatch.setenv("CCTV_MOTION_ROI", "0.2, 0.3, 0.8, 0.9")
+    config = load_config()
+    assert config.motion_roi == [(0.2, 0.3), (0.8, 0.9)]
+
+
+def test_load_config_motion_roi_env_invalid(monkeypatch, capsys):
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    monkeypatch.setenv("CCTV_MOTION_ROI", "invalid_format")
+    config = load_config()
+    assert config.motion_roi is None
+    captured = capsys.readouterr()
+    assert "Failed to parse CCTV_MOTION_ROI env" in captured.out
+
+    monkeypatch.setenv("CCTV_MOTION_ROI", "0.2, 0.3, 0.8")
+    config = load_config()
+    assert config.motion_roi is None
