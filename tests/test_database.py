@@ -11,7 +11,7 @@ def test_database_initialization(db_manager):
 
 def test_log_enter_event(db_manager):
     """Ensures entering increments occupancy and activates presence."""
-    eid = db_manager.log_event("ENTER", tracker_id=1, confidence=0.92)
+    eid = db_manager.log_event("ENTER", tracker_id=1, confidence=0.92, session_id="test-session-123")
     assert eid > 0
     
     state = db_manager.get_current_state()
@@ -24,6 +24,7 @@ def test_log_enter_event(db_manager):
     assert events[0]["event_type"] == "ENTER"
     assert events[0]["tracker_id"] == 1
     assert events[0]["confidence"] == 0.92
+    assert events[0]["session_id"] == "test-session-123"
 
 def test_log_leave_event(db_manager):
     """Ensures leaving decrements occupancy correctly."""

@@ -47,7 +47,8 @@ class DatabaseManager:
                         tracker_id INTEGER,
                         confidence REAL,
                         timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        snapshot_path TEXT
+                        snapshot_path TEXT,
+                        session_id TEXT
                     );
                 """)
                 conn.commit()
@@ -72,7 +73,8 @@ class DatabaseManager:
             conn.close()
 
     def log_event(self, event_type: str, tracker_id: Optional[int] = None, 
-                  confidence: Optional[float] = None, snapshot_path: Optional[str] = None) -> int:
+                  confidence: Optional[float] = None, snapshot_path: Optional[str] = None,
+                  session_id: Optional[str] = None) -> int:
         """Logs entry/leave event and updates state atomically."""
         # Convert any numpy integers/floats or other convertible types to standard python types
         if tracker_id is not None:
@@ -94,9 +96,9 @@ class DatabaseManager:
                     
                 # Log the event
                 cursor = conn.execute("""
-                    INSERT INTO events_log (event_type, tracker_id, confidence, timestamp, snapshot_path)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (event_type, tracker_id, confidence, now, snapshot_path))
+                    INSERT INTO events_log (event_type, tracker_id, confidence, timestamp, snapshot_path, session_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (event_type, tracker_id, confidence, now, snapshot_path, session_id))
                 event_id = cursor.lastrowid
                 
                 # Fetch current occupancy
@@ -154,7 +156,7 @@ class DatabaseManager:
         conn = self.get_connection()
         try:
             cursor = conn.execute("""
-                SELECT id, event_type, tracker_id, confidence, timestamp, snapshot_path
+                SELECT id, event_type, tracker_id, confidence, timestamp, snapshot_path, session_id
                 FROM events_log
                 ORDER BY timestamp DESC, id DESC
                 LIMIT ?

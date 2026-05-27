@@ -31,6 +31,7 @@ class StatusResponse(BaseModel):
     last_updated: str = Field(..., description="ISO Timestamp of the last state change")
     last_processed_frame: Optional[str] = Field(default=None, description="ISO Timestamp of the last processed frame from the camera stream")
     system_state: str = Field(..., description="Current system state: 'IDLE' (low-CPU OpenCV motion detection), 'ACTIVE' (full YOLOv8 object detection), or 'OFFLINE' if pipeline is not running")
+    current_session_id: Optional[str] = Field(default=None, description="UUID of the current active YOLO session")
 
 
 class EventLogItem(BaseModel):
@@ -40,6 +41,7 @@ class EventLogItem(BaseModel):
     confidence: Optional[float]
     timestamp: str
     snapshot_path: Optional[str]
+    session_id: Optional[str] = None
 
 
 class ResetRequest(BaseModel):
@@ -56,13 +58,15 @@ def get_status():
         from src.pipeline import OrchestratorRegistry
         orchestrator = OrchestratorRegistry.get_instance()
         system_state = orchestrator.state if orchestrator is not None else "OFFLINE"
+        current_session_id = orchestrator.object_tracker.session_id if orchestrator is not None else None
         
         return StatusResponse(
             is_someone_home=state["is_someone_home"],
             current_occupancy=state["current_occupancy"],
             last_updated=state["last_updated"] or "",
             last_processed_frame=FrameRegistry.get_last_timestamp_iso(),
-            system_state=system_state
+            system_state=system_state,
+            current_session_id=current_session_id
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")

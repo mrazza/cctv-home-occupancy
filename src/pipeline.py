@@ -214,7 +214,8 @@ class PipelineOrchestrator:
                     event_type=event["event_type"],
                     tracker_id=event["tracker_id"],
                     confidence=event["confidence"],
-                    snapshot_path=event["snapshot_path"]
+                    snapshot_path=event["snapshot_path"],
+                    session_id=self.object_tracker.session_id
                 )
                 logger.info(f"Successfully logged crossing event to DB (Event ID: {event_id})")
                 

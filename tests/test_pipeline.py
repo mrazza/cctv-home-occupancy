@@ -13,6 +13,7 @@ def test_pipeline_states_idle_to_active(db_manager):
     """Verifies that the orchestrator switches states correctly when motion is detected."""
     mock_md = MagicMock(spec=MotionDetector)
     mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.session_id = "test-session-123"
     
     # Configure mock object tracker to have empty tracks
     mock_ot.track_histories = {}
@@ -49,6 +50,7 @@ def test_pipeline_active_cooldown(db_manager):
     """Verifies the active cooldown works and reverts back to IDLE after cooldown frames."""
     mock_md = MagicMock(spec=MotionDetector)
     mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.session_id = "test-session-123"
     
     mock_ot.track_histories = {}
     
@@ -82,6 +84,7 @@ def test_pipeline_logs_events(db_manager):
     """Verifies that detected events are logged into the database and update presence."""
     mock_md = MagicMock(spec=MotionDetector)
     mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.session_id = "test-session-123"
     
     mock_ot.track_histories = {}
     
@@ -248,6 +251,7 @@ def test_pipeline_orchestrator_run_on_stream_event_trigger_mode(db_manager):
     
     mock_md = MagicMock(spec=MotionDetector)
     mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.session_id = "test-session-123"
     mock_ot.track_histories = {}
     
     orchestrator = PipelineOrchestrator(
@@ -334,6 +338,7 @@ def test_pipeline_orchestrator_event_mode_cleanup_on_expiry(db_manager):
     
     mock_md = MagicMock(spec=MotionDetector)
     mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.session_id = "test-session-123"
     mock_ot.track_histories = {}
     
     orchestrator = PipelineOrchestrator(
@@ -408,6 +413,7 @@ def test_pipeline_webhook_success(db_manager, monkeypatch):
     mock_md.detect.return_value = True
     
     mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.session_id = "test-session-123"
     mock_ot.track_histories = {}
     mock_ot.process_frame.return_value = [{
         "event_type": "ENTER",
@@ -471,6 +477,7 @@ def test_pipeline_webhook_failure(db_manager, monkeypatch, caplog):
     mock_md.detect.return_value = True
     
     mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.session_id = "test-session-123"
     mock_ot.track_histories = {}
     mock_ot.process_frame.return_value = [{
         "event_type": "LEAVE",
@@ -515,6 +522,7 @@ def test_pipeline_webhook_db_failure(db_manager, monkeypatch):
     mock_md.detect.return_value = True
     
     mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.session_id = "test-session-123"
     mock_ot.track_histories = {}
     mock_ot.process_frame.return_value = [{
         "event_type": "ENTER",
