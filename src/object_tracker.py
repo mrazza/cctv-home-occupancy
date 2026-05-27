@@ -1,11 +1,15 @@
 import os
 import cv2
+import uuid
 import numpy as np
 from datetime import datetime
 from typing import Optional, Tuple, Dict, List, Any
 from ultralytics import YOLO
 
 class ObjectTracker:
+    # Class-level attribute to support mocking/autospecing
+    session_id: Optional[str] = None
+
     def __init__(self, 
                  model_name: str = "yolov8n.pt", 
                  tripwire_line: Optional[List[Tuple[float, float]]] = None,
@@ -20,6 +24,9 @@ class ObjectTracker:
         """
         # Load YOLO model
         self.model = YOLO(model_name)
+        
+        # Unique session ID for this instantiation
+        self.session_id = str(uuid.uuid4())
         
         # Normalized tripwire line segment, e.g. [(0.2, 0.5), (0.8, 0.5)]
         self.tripwire_line = tripwire_line or [(0.2, 0.5), (0.8, 0.5)]

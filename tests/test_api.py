@@ -40,6 +40,7 @@ def test_api_get_status_with_system_states():
     from src.pipeline import OrchestratorRegistry
     mock_orchestrator = MagicMock()
     mock_orchestrator.state = "IDLE"
+    mock_orchestrator.object_tracker.session_id = "test-session-id-123"
     
     original_instance = OrchestratorRegistry.get_instance()
     OrchestratorRegistry.set_instance(mock_orchestrator)
