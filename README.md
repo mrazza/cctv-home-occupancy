@@ -58,6 +58,15 @@ In screen coordinates, the top-left corner is `(0.0, 0.0)` and the bottom-right 
 
 ---
 
+### 3. Hysteresis Dead Zone
+To prevent centroid jitter from causing spurious, rapid-fire `ENTER` and `LEAVE` events (e.g. when someone stands on or lingers near the tripwire), the tracker employs a configurable **hysteresis dead zone** around the tripwire.
+- The dead zone is defined as a fraction of the frame height (via `tripwire_dead_zone_width`, default `0.05` or 5%).
+- A track's side state is only updated/committed (and an event emitted) when the person's centroid **fully clears** the dead zone boundary on the opposite side of the line.
+- Movement inside the dead zone is ignored and does not alter the confirmed side state.
+- Set the dead zone width to `0.0` to disable this behavior and trigger events immediately upon any crossing.
+
+---
+
 ## 🚀 Installation & Setup
 
 ### 1. Prerequisites
@@ -93,6 +102,7 @@ You can customize runtime parameters using environment variables without editing
 | `CCTV_MOTION_COOLDOWN` | `150` | How many frames of silence before shutting off YOLO. |
 | `CCTV_DB_PATH` | `db/presence.db` | Path to the SQLite presence database. |
 | `CCTV_SNAPSHOT_DIR` | `snapshots` | Folder path where face/body crops are stored. |
+| `CCTV_DEAD_ZONE_WIDTH` | `0.05` | Width of the hysteresis dead zone around the tripwire, as a fraction of frame height (0.0 to 1.0). The centroid must move beyond half this width on the far side of the line to register a crossing. |
 | `CCTV_WEBHOOK_URLS` | `[]` | Comma-separated list or JSON list of Webhook HTTP POST URLs to trigger. |
 | `CCTV_WEBHOOK_TIMEOUT` | `5` | Timeout in seconds for webhook requests. |
 

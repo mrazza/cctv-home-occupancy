@@ -93,7 +93,11 @@ def main():
     if not args.no_pipeline:
         # Pass custom tripwire_line override to object tracker
         from src.object_tracker import ObjectTracker
-        tracker = ObjectTracker(tripwire_line=tripwire_line, snapshot_dir=CONFIG.snapshot_dir)
+        tracker = ObjectTracker(
+            tripwire_line=tripwire_line,
+            snapshot_dir=CONFIG.snapshot_dir,
+            dead_zone_width=CONFIG.tripwire_dead_zone_width
+        )
         from src.motion_detector import MotionDetector
         detector = MotionDetector(
             threshold=CONFIG.motion_threshold,

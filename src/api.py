@@ -9,6 +9,7 @@ from typing import Optional, List, Dict, Any
 from src.config import CONFIG
 from src.database import DatabaseManager
 from src.pipeline import FrameRegistry
+from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines
 
 app = FastAPI(
     title="House Presence Monitoring API",
@@ -111,41 +112,6 @@ def get_snapshot(filename: str):
     return FileResponse(filepath)
 
 
-def calculate_arrow_endpoint(A: tuple[int, int], B: tuple[int, int], length: float = 50.0) -> tuple[tuple[int, int], tuple[int, int]]:
-    """
-    Given a line segment from A to B, calculates the center point of AB
-    and an endpoint for an arrow pointing to the left-hand side of vector AB.
-    """
-    Ax, Ay = A
-    Bx, By = B
-    
-    # Midpoint of AB
-    Cx = int((Ax + Bx) / 2)
-    Cy = int((Ay + By) / 2)
-    
-    # Vector AB
-    vx = Bx - Ax
-    vy = By - Ay
-    
-    # Perpendicular vector pointing to the left side: (-vy, vx)
-    nx = -vy
-    ny = vx
-    
-    # Normalize perpendicular vector
-    mag = np.sqrt(nx**2 + ny**2)
-    if mag < 1e-9:
-        return (Cx, Cy), (Cx, Cy)
-        
-    ux = nx / mag
-    uy = ny / mag
-    
-    # Arrow destination
-    Dx = int(Cx + length * ux)
-    Dy = int(Cy + length * uy)
-    
-    return (Cx, Cy), (Dx, Dy)
-
-
 @app.get("/frame", tags=["Stream"])
 def get_current_frame(
     draw_tripwire: bool = Query(default=False, description="Draw the tripwire line and inside direction vector on the frame"),
@@ -186,6 +152,22 @@ def get_current_frame(
         cv2.arrowedLine(frame, mid, arrow_dest, (0, 255, 0), 3, tipLength=0.3, line_type=cv2.LINE_AA)
         cv2.putText(frame, "INSIDE / ENTER", (arrow_dest[0] + 10, arrow_dest[1] + 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
+        
+        # Draw dead zone boundaries if configured
+        dead_zone_width = CONFIG.tripwire_dead_zone_width
+        if dead_zone_width > 0:
+            dead_zone_half_px = (dead_zone_width * h) / 2.0
+            (ins_A, ins_B), (out_A, out_B) = compute_dead_zone_lines(pt_A, pt_B, dead_zone_half_px)
+            
+            # Semi-transparent dead zone fill
+            overlay = frame.copy()
+            zone_polygon = np.array([ins_A, ins_B, out_B, out_A], dtype=np.int32)
+            cv2.fillPoly(overlay, [zone_polygon], (0, 255, 255))  # Yellow fill
+            cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
+            
+            # Boundary lines (solid thin cyan/yellow lines)
+            cv2.line(frame, ins_A, ins_B, (255, 255, 0), 1, cv2.LINE_AA)
+            cv2.line(frame, out_A, out_B, (255, 255, 0), 1, cv2.LINE_AA)
 
     # 3b. Optional: Draw ROI Overlay
     if draw_roi and CONFIG.motion_roi is not None and len(CONFIG.motion_roi) >= 2:

@@ -1,6 +1,7 @@
 import os
 import cv2
 import uuid
+import math
 import numpy as np
 from datetime import datetime
 from typing import Optional, Tuple, Dict, List, Any
@@ -13,7 +14,8 @@ class ObjectTracker:
     def __init__(self, 
                  model_name: str = "yolov8n.pt", 
                  tripwire_line: Optional[List[Tuple[float, float]]] = None,
-                 snapshot_dir: str = "snapshots"):
+                 snapshot_dir: str = "snapshots",
+                 dead_zone_width: float = 0.0):
         """
         Object Tracker utilizing YOLOv8/11 and ByteTrack to trace person trajectories and detect line crossing events.
         
@@ -21,6 +23,9 @@ class ObjectTracker:
             model_name: Name of the YOLO model to use (defaults to yolov8n.pt for CPU efficiency)
             tripwire_line: Normalized tripwire line coordinates [(x1, y1), (x2, y2)]
             snapshot_dir: Directory where person crops are saved
+            dead_zone_width: Width of the hysteresis dead zone around the tripwire, as a fraction of frame height.
+                When set to 0.0, any signed-distance change across the line triggers an event immediately
+                (note: this uses distance-based logic, not segment intersection).
         """
         # Load YOLO model
         self.model = YOLO(model_name)
@@ -31,43 +36,13 @@ class ObjectTracker:
         # Normalized tripwire line segment, e.g. [(0.2, 0.5), (0.8, 0.5)]
         self.tripwire_line = tripwire_line or [(0.2, 0.5), (0.8, 0.5)]
         self.snapshot_dir = snapshot_dir
+        self.dead_zone_width = dead_zone_width
         os.makedirs(self.snapshot_dir, exist_ok=True)
         
         # Track history: mapping of tracker_id -> list of centroids (x, y)
         self.track_histories: Dict[int, List[Tuple[float, float]]] = {}
-        # Track side state: mapping of tracker_id -> last known side (+1 or -1 or 0)
-        self.track_sides: Dict[int, int] = {}
-
-    def _get_ccw_orientation(self, A: Tuple[float, float], B: Tuple[float, float], C: Tuple[float, float]) -> int:
-        """
-        Calculates orientation of triplet (A, B, C).
-        Returns:
-            0: Collinear
-            1: Clockwise
-            -1: Counterclockwise
-        """
-        val = (B[1] - A[1]) * (C[0] - B[0]) - (B[0] - A[0]) * (C[1] - B[1])
-        if abs(val) < 1e-9:
-            return 0
-        return 1 if val > 0 else -1
-
-    def _check_intersection(self, A: Tuple[float, float], B: Tuple[float, float], 
-                            C: Tuple[float, float], D: Tuple[float, float]) -> bool:
-        """
-        Checks if line segment AB and CD intersect.
-        """
-        o1 = self._get_ccw_orientation(A, B, C)
-        o2 = self._get_ccw_orientation(A, B, D)
-        o3 = self._get_ccw_orientation(C, D, A)
-        o4 = self._get_ccw_orientation(C, D, B)
-
-        # General case
-        if o1 != o2 and o3 != o4:
-            return True
-            
-        # Special cases (collinear points on segment)
-        # For simplicity in movement tracking, we ignore pure collinear overlaps unless they cross.
-        return False
+        # Track confirmed side state: mapping of tracker_id -> last known confirmed side (+1 or -1 or 0)
+        self.track_confirmed_sides: Dict[int, int] = {}
 
     def _get_point_side(self, A: Tuple[float, float], B: Tuple[float, float], P: Tuple[float, float]) -> int:
         """
@@ -81,6 +56,20 @@ class ObjectTracker:
         if abs(val) < 1e-9:
             return 0
         return 1 if val > 0 else -1
+
+    def _get_signed_distance(self, A: Tuple[float, float], B: Tuple[float, float],
+                             P: Tuple[float, float]) -> float:
+        """
+        Returns the signed perpendicular distance from point P to the directed line AB.
+        Positive = left/inside side (+1), Negative = right/outside side (-1).
+        Result is in the same units as A, B, P (pixels when called from process_frame).
+        """
+        dx = B[0] - A[0]
+        dy = B[1] - A[1]
+        line_len = math.sqrt(dx * dx + dy * dy)
+        if line_len < 1e-9:
+            return 0.0
+        return (dx * (P[1] - A[1]) - dy * (P[0] - A[0])) / line_len
 
     def save_crop(self, frame: np.ndarray, bbox: Tuple[int, int, int, int], tracker_id: int, event_type: str) -> Optional[str]:
         """Saves a high-resolution crop of the person bounding box for future face recognition."""
@@ -112,6 +101,9 @@ class ObjectTracker:
             [{"event_type": "ENTER"/"LEAVE", "tracker_id": id, "confidence": conf, "snapshot_path": path}]
         """
         h, w, _ = frame.shape
+        
+        # Compute dead zone threshold in pixel space (based on frame height)
+        dead_zone_half_px = (self.dead_zone_width * h) / 2.0
         
         # Convert normalized tripwire coordinates to pixel values
         tx1, ty1 = int(self.tripwire_line[0][0] * w), int(self.tripwire_line[0][1] * h)
@@ -150,44 +142,37 @@ class ObjectTracker:
                     if tracker_id not in self.track_histories:
                         self.track_histories[tracker_id] = []
                         # Calculate initial side of the tripwire
-                        self.track_sides[tracker_id] = self._get_point_side(A, B, curr_point)
+                        self.track_confirmed_sides[tracker_id] = self._get_point_side(A, B, curr_point)
                     
-                    prev_history = self.track_histories[tracker_id]
+                    confirmed_side = self.track_confirmed_sides[tracker_id]
+                    signed_dist = self._get_signed_distance(A, B, curr_point)
                     
-                    if len(prev_history) > 0:
-                        prev_point = prev_history[-1]
-                        
-                        # Check intersection
-                        if self._check_intersection(A, B, prev_point, curr_point):
-                            # Side checking logic to verify crossing direction
-                            prev_side = self.track_sides[tracker_id]
-                            curr_side = self._get_point_side(A, B, curr_point)
+                    event_type = None
+                    # Hysteresis crossing logic:
+                    # Centroid must cross to the opposite side and exceed the dead zone boundary.
+                    if confirmed_side == -1 and signed_dist > dead_zone_half_px:
+                        event_type = "ENTER"
+                        self.track_confirmed_sides[tracker_id] = 1
+                    elif confirmed_side == 1 and signed_dist < -dead_zone_half_px:
+                        event_type = "LEAVE"
+                        self.track_confirmed_sides[tracker_id] = -1
+                    elif confirmed_side == 0:
+                        # If initially collinear, commit to whichever side the centroid moves towards
+                        if signed_dist > dead_zone_half_px:
+                            self.track_confirmed_sides[tracker_id] = 1
+                        elif signed_dist < -dead_zone_half_px:
+                            self.track_confirmed_sides[tracker_id] = -1
                             
-                            # If they transitioned sides
-                            if prev_side != curr_side and prev_side != 0 and curr_side != 0:
-                                # Define crossing event type based on direction change
-                                # side = 1 is designated "inside" (Left of directed vector AB)
-                                # side = -1 is designated "outside" (Right of directed vector AB)
-                                if prev_side == -1 and curr_side == 1:
-                                    event_type = "ENTER"
-                                elif prev_side == 1 and curr_side == -1:
-                                    event_type = "LEAVE"
-                                else:
-                                    event_type = None
-                                    
-                                if event_type:
-                                    bbox = (int(x1), int(y1), int(x2), int(y2))
-                                    snapshot_path = self.save_crop(frame, bbox, tracker_id, event_type)
-                                    events.append({
-                                        "event_type": event_type,
-                                        "tracker_id": int(tracker_id),
-                                        "confidence": float(conf),
-                                        "snapshot_path": snapshot_path
-                                    })
+                    if event_type:
+                        bbox = (int(x1), int(y1), int(x2), int(y2))
+                        snapshot_path = self.save_crop(frame, bbox, tracker_id, event_type)
+                        events.append({
+                            "event_type": event_type,
+                            "tracker_id": int(tracker_id),
+                            "confidence": float(conf),
+                            "snapshot_path": snapshot_path
+                        })
                                 
-                            # Update known side
-                            self.track_sides[tracker_id] = curr_side
-                            
                     # Append current point to history and limit size to last 10 points
                     self.track_histories[tracker_id].append(curr_point)
                     if len(self.track_histories[tracker_id]) > 10:
@@ -197,7 +182,7 @@ class ObjectTracker:
         dead_ids = [tid for tid in self.track_histories if tid not in active_tracker_ids]
         for tid in dead_ids:
             del self.track_histories[tid]
-            if tid in self.track_sides:
-                del self.track_sides[tid]
+            if tid in self.track_confirmed_sides:
+                del self.track_confirmed_sides[tid]
 
         return events

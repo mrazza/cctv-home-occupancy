@@ -36,6 +36,12 @@ class CameraConfig(BaseModel):
         default=[(0.2, 0.5), (0.8, 0.5)],
         description="Coordinates of the tripwire line segment [(x1, y1), (x2, y2)] normalized between 0.0 and 1.0"
     )
+    tripwire_dead_zone_width: float = Field(
+        default=0.05,
+        description="Width of the hysteresis dead zone around the tripwire, as a fraction of frame height (0.0 to 1.0). "
+                    "The centroid must move beyond half this width on the far side of the line to register a crossing. "
+                    "Set to 0.0 to disable the dead zone."
+    )
     
     # Database Settings
     db_path: str = Field(default="db/presence.db", description="Path to SQLite database file")
@@ -78,6 +84,7 @@ def load_config() -> CameraConfig:
         "CCTV_DB_PATH": ("db_path", str),
         "CCTV_SNAPSHOT_DIR": ("snapshot_dir", str),
         "CCTV_WEBHOOK_TIMEOUT": ("webhook_timeout", int),
+        "CCTV_DEAD_ZONE_WIDTH": ("tripwire_dead_zone_width", float),
     }
     
     # Handle CCTV_WEBHOOK_URLS env variable

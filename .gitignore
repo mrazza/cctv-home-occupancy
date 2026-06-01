@@ -128,3 +128,6 @@ db/
 snapshots/
 *.jpg
 *.png
+
+# Runtime config (may contain credentials like RTSP URLs)
+config.json

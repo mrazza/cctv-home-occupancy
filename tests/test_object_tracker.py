@@ -5,37 +5,6 @@ import pytest
 from unittest.mock import MagicMock, patch
 from src.object_tracker import ObjectTracker
 
-def test_ccw_orientation():
-    tracker = ObjectTracker()
-    A = (0.0, 0.0)
-    B = (1.0, 0.0)
-    
-    # C is clockwise (right of vector AB)
-    C_cw = (0.5, -1.0)
-    # C is counterclockwise (left of vector AB)
-    C_ccw = (0.5, 1.0)
-    # C is collinear
-    C_col = (0.5, 0.0)
-    
-    # NOTE: Our math implementation has:
-    # (B[1] - A[1]) * (C[0] - B[0]) - (B[0] - A[0]) * (C[1] - B[1])
-    # Let's verify the exact orientation values returned
-    assert tracker._get_ccw_orientation(A, B, C_col) == 0
-    assert tracker._get_ccw_orientation(A, B, C_ccw) == -1
-    assert tracker._get_ccw_orientation(A, B, C_cw) == 1
-
-def test_check_intersection():
-    tracker = ObjectTracker()
-    
-    # Intersecting segments
-    A, B = (0.0, 0.0), (2.0, 2.0)
-    C, D = (0.0, 2.0), (2.0, 0.0)
-    assert tracker._check_intersection(A, B, C, D) is True
-
-    # Non-intersecting segments
-    C2, D2 = (3.0, 3.0), (4.0, 4.0)
-    assert tracker._check_intersection(A, B, C2, D2) is False
-
 def test_get_point_side():
     tracker = ObjectTracker()
     A = (0.0, 0.0)
@@ -129,7 +98,7 @@ def test_process_frame_crossing_events(temp_dir):
         events_f1 = tracker.process_frame(frame)
         assert events_f1 == []
         assert len(tracker.track_histories[1]) == 1
-        assert tracker.track_sides[1] == 1
+        assert tracker.track_confirmed_sides[1] == 1
         
         # Frame 2: Track 1 crosses
         boxes_f2 = MockBoxes([[40, 10, 60, 30]], [1], [0.96])
@@ -174,15 +143,6 @@ def test_object_tracker_save_crop_exception(temp_dir):
     assert crop_path is None
 
 
-def test_object_tracker_ccw_orientation_almost_collinear():
-    """Verifies _get_ccw_orientation handles very small non-zero float values as collinear."""
-    tracker = ObjectTracker()
-    A = (0.0, 0.0)
-    B = (1.0, 0.0)
-    # C is extremely close to the line segment AB
-    C = (0.5, 1e-11)
-    assert tracker._get_ccw_orientation(A, B, C) == 0
-
 
 def test_object_tracker_get_point_side_almost_collinear():
     """Verifies _get_point_side handles very small non-zero float values as collinear."""
@@ -206,7 +166,7 @@ def test_object_tracker_enter_crossing_and_history_pop(temp_dir):
         mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
         events_f1 = tracker.process_frame(frame)
         assert events_f1 == []
-        assert tracker.track_sides[1] == -1
+        assert tracker.track_confirmed_sides[1] == -1
         
         # Frame 2: Moves below (y = 80, side = 1) -> triggers ENTER
         boxes_f2 = MockBoxes([[40, 70, 60, 90]], [1], [0.96])
@@ -236,8 +196,8 @@ def test_object_tracker_unreachable_else(temp_dir):
         mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
         tracker.process_frame(frame)
         
-        # Manually alter track_sides to a non-standard value to hit 'else' branch
-        tracker.track_sides[1] = 42
+        # Manually alter track_confirmed_sides to a non-standard value to hit 'else' branch
+        tracker.track_confirmed_sides[1] = 42
         
         # Move across line
         boxes_f2 = MockBoxes([[40, 70, 60, 90]], [1], [0.96])
@@ -245,4 +205,143 @@ def test_object_tracker_unreachable_else(temp_dir):
         events = tracker.process_frame(frame)
         assert len(events) == 0  # event_type is None
 
+
+def test_tripwire_jitter_does_not_produce_spurious_events(temp_dir):
+    """Regression test reproducing tripwire jitter causing spurious ENTER/LEAVE events."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        # Tripwire at y = 0.5 (middle of frame) horizontal
+        # Set dead_zone_width to 0.1 (10% of frame height -> 10 px total width on 100 px height, i.e., ±5 px)
+        tracker = ObjectTracker(
+            tripwire_line=[(0.0, 0.5), (1.0, 0.5)],
+            snapshot_dir=temp_dir,
+            dead_zone_width=0.1
+        )
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        
+        all_events = []
+        
+        # Frame 1: Person starts outside/above (centroid y = 20)
+        boxes_f1 = MockBoxes([[40, 10, 60, 30]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
+        all_events.extend(tracker.process_frame(frame))
+        
+        # Frame 2: Person crosses to inside/below (centroid y = 80) -> Should trigger ENTER
+        boxes_f2 = MockBoxes([[40, 65, 60, 95]], [1], [0.96])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f2)]
+        all_events.extend(tracker.process_frame(frame))
+        
+        # Frame 3: Person jitters inside dead zone (centroid y = 48) -> Should NOT trigger event
+        boxes_f3 = MockBoxes([[40, 38, 60, 58]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f3)]
+        all_events.extend(tracker.process_frame(frame))
+        
+        # Frame 4: Person jitters inside dead zone (centroid y = 52) -> Should NOT trigger event
+        boxes_f4 = MockBoxes([[40, 42, 60, 62]], [1], [0.94])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f4)]
+        all_events.extend(tracker.process_frame(frame))
+        
+        # Frame 5: Person jitters inside dead zone (centroid y = 46) -> Should NOT trigger event
+        boxes_f5 = MockBoxes([[40, 36, 60, 56]], [1], [0.93])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f5)]
+        all_events.extend(tracker.process_frame(frame))
+        
+        # Assert total events across all 5 frames is exactly 1 (only the first ENTER)
+        assert len(all_events) == 1
+        assert all_events[0]["event_type"] == "ENTER"
+
+
+def test_dead_zone_zero_width_equivalent_to_old_behavior(temp_dir):
+    """Verifies that dead_zone_width=0.0 matches old intersection/side crossing behavior."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        # Tripwire at y = 0.5 horizontal, dead_zone_width = 0.0
+        tracker = ObjectTracker(
+            tripwire_line=[(0.0, 0.5), (1.0, 0.5)],
+            snapshot_dir=temp_dir,
+            dead_zone_width=0.0
+        )
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        
+        # Frame 1: starts outside/above (centroid y = 20)
+        boxes_f1 = MockBoxes([[40, 10, 60, 30]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
+        events_f1 = tracker.process_frame(frame)
+        assert events_f1 == []
+        
+        # Frame 2: crosses inside/below (centroid y = 80) -> ENTER
+        boxes_f2 = MockBoxes([[40, 70, 60, 90]], [1], [0.96])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f2)]
+        events_f2 = tracker.process_frame(frame)
+        assert len(events_f2) == 1
+        assert events_f2[0]["event_type"] == "ENTER"
+        
+        # Frame 3: crosses back outside/above (centroid y = 20) -> LEAVE
+        boxes_f3 = MockBoxes([[40, 10, 60, 30]], [1], [0.97])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f3)]
+        events_f3 = tracker.process_frame(frame)
+        assert len(events_f3) == 1
+        assert events_f3[0]["event_type"] == "LEAVE"
+
+
+def test_genuine_crossing_with_dead_zone(temp_dir):
+    """Verifies a genuine crossing event is triggered when the centroid fully clears the dead zone."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        # Tripwire at y = 0.5 horizontal, dead_zone_width = 0.2 (20 px total, ±10 px, so inside is y > 60, outside is y < 40)
+        tracker = ObjectTracker(
+            tripwire_line=[(0.0, 0.5), (1.0, 0.5)],
+            snapshot_dir=temp_dir,
+            dead_zone_width=0.2
+        )
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        
+        # Frame 1: Person starts outside (centroid y = 20)
+        boxes_f1 = MockBoxes([[40, 10, 60, 30]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
+        assert tracker.process_frame(frame) == []
+        
+        # Frame 2: Person enters dead zone but does not clear it (centroid y = 55, inside is y > 60)
+        boxes_f2 = MockBoxes([[40, 45, 60, 65]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f2)]
+        assert tracker.process_frame(frame) == []
+        
+        # Frame 3: Person fully clears the dead zone (centroid y = 65, which is > 60) -> Should trigger ENTER
+        boxes_f3 = MockBoxes([[40, 55, 60, 75]], [1], [0.96])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f3)]
+        events = tracker.process_frame(frame)
+        assert len(events) == 1
+        assert events[0]["event_type"] == "ENTER"
+
+
+def test_signed_distance_method():
+    """Unit tests for _get_signed_distance with known horizontal and vertical line orientations."""
+    tracker = ObjectTracker()
+    
+    # Directed segment AB from (0, 0) to (10, 0) - Horizontal vector pointing right
+    A = (0.0, 0.0)
+    B = (10.0, 0.0)
+    
+    # Point on vector AB
+    P_on = (5.0, 0.0)
+    assert tracker._get_signed_distance(A, B, P_on) == pytest.approx(0.0)
+    
+    # Point above vector AB (Left hand side of vector -> Positive distance)
+    # A to B is right, so left is up (+y)
+    P_above = (5.0, 3.0)
+    assert tracker._get_signed_distance(A, B, P_above) == pytest.approx(3.0)
+    
+    # Point below vector AB (Right hand side of vector -> Negative distance)
+    P_below = (5.0, -4.0)
+    assert tracker._get_signed_distance(A, B, P_below) == pytest.approx(-4.0)
+    
+    # Directed segment CD from (0, 0) to (0, 10) - Vertical vector pointing down/up?
+    # In screen coords, positive y is down, but let's test general math: CD from (0, 0) to (0, 10)
+    C = (0.0, 0.0)
+    D = (0.0, 10.0)
+    
+    # C to D is along +y. Left hand side of CD vector is -x (dx = 0, dy = 10, nx = -10, ny = 0)
+    # Formula: (dx * (P_y - A_y) - dy * (P_x - A_x)) / line_len = (0 - 10 * (P_x - 0)) / 10 = -P_x
+    P_left = (-3.0, 5.0)
+    assert tracker._get_signed_distance(C, D, P_left) == pytest.approx(3.0)
+    
+    P_right = (4.0, 5.0)
+    assert tracker._get_signed_distance(C, D, P_right) == pytest.approx(-4.0)
 

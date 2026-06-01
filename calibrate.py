@@ -5,40 +5,8 @@ import argparse
 import numpy as np
 from typing import Tuple, List, Optional
 from src.config import CONFIG
+from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines
 
-def calculate_arrow_endpoint(A: Tuple[int, int], B: Tuple[int, int], length: float = 50.0) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    """
-    Given a line segment from A to B, calculates the center point of AB
-    and an endpoint for an arrow pointing to the left-hand side of vector AB.
-    """
-    Ax, Ay = A
-    Bx, By = B
-    
-    # Midpoint of AB
-    Cx = int((Ax + Bx) / 2)
-    Cy = int((Ay + By) / 2)
-    
-    # Vector AB
-    vx = Bx - Ax
-    vy = By - Ay
-    
-    # Perpendicular vector pointing to the left side: (-vy, vx)
-    nx = -vy
-    ny = vx
-    
-    # Normalize perpendicular vector
-    mag = np.sqrt(nx**2 + ny**2)
-    if mag < 1e-9:
-        return (Cx, Cy), (Cx, Cy)
-        
-    ux = nx / mag
-    uy = ny / mag
-    
-    # Arrow destination
-    Dx = int(Cx + length * ux)
-    Dy = int(Cy + length * uy)
-    
-    return (Cx, Cy), (Dx, Dy)
 
 def normalize_coordinates(A: Tuple[int, int], B: Tuple[int, int], width: int, height: int, sort_coords: bool = False) -> List[Tuple[float, float]]:
     """
@@ -209,6 +177,22 @@ class CalibrationApp:
                 cv2.arrowedLine(frame_draw, mid, arrow_dest, (0, 255, 0), 3, tipLength=0.3, line_type=cv2.LINE_AA)
                 cv2.putText(frame_draw, "INSIDE / ENTER", (arrow_dest[0] + 10, arrow_dest[1] + 5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
+                
+                # Draw dead zone visualization
+                dead_zone_width = CONFIG.tripwire_dead_zone_width
+                if dead_zone_width > 0:
+                    dead_zone_half_px = (dead_zone_width * h) / 2.0
+                    (ins_A, ins_B), (out_A, out_B) = compute_dead_zone_lines(self.pt_A, self.pt_B, dead_zone_half_px)
+                    
+                    # Semi-transparent dead zone fill
+                    overlay = frame_draw.copy()
+                    zone_polygon = np.array([ins_A, ins_B, out_B, out_A], dtype=np.int32)
+                    cv2.fillPoly(overlay, [zone_polygon], (0, 255, 255))  # Yellow fill
+                    cv2.addWeighted(overlay, 0.15, frame_draw, 0.85, 0, frame_draw)
+                    
+                    # Thin boundary lines
+                    cv2.line(frame_draw, ins_A, ins_B, (255, 255, 0), 1, cv2.LINE_AA)
+                    cv2.line(frame_draw, out_A, out_B, (255, 255, 0), 1, cv2.LINE_AA)
                 
                 cv2.putText(frame_draw, "Status: Ready to Save [S] or Reset [R]", (15, h - 20),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
