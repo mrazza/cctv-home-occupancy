@@ -7,6 +7,7 @@ class CameraConfig(BaseModel):
     rtsp_url: str = Field(default="rtsp://localhost:8554/nest-cam", description="RTSP URL for the camera stream")
     model_name: str = Field(default="yolov8n.pt", description="YOLO model configuration name or local PT path")
     fps_limit: int = Field(default=10, description="Target frames per second to process")
+    video_buffer_size: int = Field(default=1, description="Size of the OpenCV VideoCapture buffer queue")
     
     # API Server Settings
     host: str = Field(default="0.0.0.0", description="IP address to bind the API server to")
@@ -105,6 +106,7 @@ def load_config() -> CameraConfig:
         "CCTV_TRIPWIRE_STRICT_SEGMENT": ("tripwire_strict_segment", lambda x: str(x).lower() in ("true", "1", "yes")),
         "CCTV_TRACKER_CONFIDENCE": ("tracker_confidence", float),
         "CCTV_TRACK_BUFFER": ("track_buffer", int),
+        "CCTV_VIDEO_BUFFER_SIZE": ("video_buffer_size", int),
     }
     
     # Handle CCTV_WEBHOOK_URLS env variable

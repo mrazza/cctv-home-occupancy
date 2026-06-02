@@ -54,10 +54,15 @@ class OrchestratorRegistry:
 
 
 class ThreadedVideoReader:
-    def __init__(self, src: str):
+    def __init__(self, src: str, buffer_size: Optional[int] = None):
         """Thread-safe background video reader to always retrieve the freshest frame."""
         self.src = src
         self.cap = cv2.VideoCapture(src)
+        
+        # Configure buffer size
+        buf_size = buffer_size if buffer_size is not None else CONFIG.video_buffer_size
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, buf_size)
+        
         self.ret = False
         self.frame: Optional[cv2.Mat] = None
         self.running = False
@@ -87,7 +92,11 @@ class ThreadedVideoReader:
                 continue
 
             try:
+                t0 = time.time()
                 ret, frame = self.cap.read()
+                elapsed = time.time() - t0
+                if elapsed > 0.1:
+                    logger.warning(f"ThreadedVideoReader: cap.read() took {elapsed * 1000.0:.1f}ms")
             except Exception:
                 logger.exception("Exception occurred during cv2.VideoCapture.read()")
                 ret = False

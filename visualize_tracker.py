@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import os
 import sys
+import logging
 import cv2
 import time
 import argparse
 import numpy as np
+
+logger = logging.getLogger("visualize_tracker")
 
 # Load config and custom types/trackers
 from src.config import CONFIG, load_config
@@ -25,7 +28,7 @@ COLOR_DARK_GRAY = (30, 30, 30)
 
 def draw_hud_sidebar(frame, tracker, is_paused, show_roi, show_tripwire, show_history, fps, frame_count, source_name):
     h, w, _ = frame.shape
-    hud_w = 340
+    hud_w = max(240, min(450, int(w * 0.18)))
     
     # 1. Overlay panel (semi-transparent dark background) - Optimized ROI crop/blend
     sub_frame = frame[10:h - 10, 10:hud_w]
@@ -38,70 +41,129 @@ def draw_hud_sidebar(frame, tracker, is_paused, show_roi, show_tripwire, show_hi
     # Draw a thin stylish cyan border around the HUD panel
     cv2.rectangle(frame, (10, 10), (hud_w, h - 10), COLOR_CYAN, 1, cv2.LINE_AA)
     
-    # 2. Text layout inside HUD
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    y = 35
+    # Calculate scale factors based on the frame height
+    scale_factor = h / 1080.0
+    is_compact = h < 700
     
-    def draw_text(text, color=COLOR_WHITE, scale=0.45, thickness=1):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    
+    if is_compact:
+        font_scale = max(0.32, min(0.42, 0.38 * (h / 500.0)))
+        header_scale = font_scale + 0.08
+        line_height = int(32 * font_scale)
+        y = int(35 * scale_factor)
+        if y < 15:
+            y = 15
+        x_offset = int(25 * (hud_w / 340.0))
+        if x_offset < 12:
+            x_offset = 12
+    else:
+        font_scale = max(0.45, min(0.65, 0.45 * scale_factor * 1.1))
+        header_scale = font_scale + 0.1
+        line_height = int(45 * font_scale)
+        y = int(35 * scale_factor)
+        if y < 35:
+            y = 35
+        x_offset = int(25 * (hud_w / 340.0))
+        if x_offset < 20:
+            x_offset = 20
+            
+    def draw_text(text, color=COLOR_WHITE, scale=font_scale, thickness=None):
         nonlocal y
-        cv2.putText(frame, text, (25, y), font, scale, color, thickness, cv2.LINE_AA)
-        y += 22
+        if thickness is None:
+            thickness = 2 if scale >= 0.45 and (color in (COLOR_GREEN, COLOR_RED, COLOR_GOLD)) else 1
+        cv2.putText(frame, text, (x_offset, y), font, scale, color, thickness, cv2.LINE_AA)
+        y += line_height
 
     def draw_header(text, color=COLOR_GOLD):
         nonlocal y
-        y += 10
-        cv2.putText(frame, text.upper(), (25, y), font, 0.55, color, 2, cv2.LINE_AA)
-        y += 24
+        y += int(10 * scale_factor) if not is_compact else 4
+        header_thick = 2 if header_scale >= 0.45 else 1
+        cv2.putText(frame, text.upper(), (x_offset, y), font, header_scale, color, header_thick, cv2.LINE_AA)
+        y += line_height + (4 if not is_compact else 2)
         # Draw a thin divider line
-        cv2.line(frame, (25, y - 10), (hud_w - 20, y - 10), (60, 60, 60), 1)
+        divider_y = y - (int(10 * scale_factor) if not is_compact else 6)
+        cv2.line(frame, (x_offset, divider_y), (hud_w - 20, divider_y), (60, 60, 60), 1)
 
-    draw_header("CCTV OBJECT TRACKER HUD", color=COLOR_CYAN)
-    
-    # System Status
-    draw_text(f"FPS: {fps:.1f}", color=COLOR_GREEN if fps > 5 else COLOR_RED, scale=0.45, thickness=2)
-    draw_text(f"Frame Count: {frame_count}")
-    
-    state_str = "PAUSED" if is_paused else "PLAYING"
-    state_col = COLOR_RED if is_paused else COLOR_GREEN
-    draw_text(f"Playback State: {state_str}", color=state_col, scale=0.45, thickness=2)
-    
-    # Stream details
-    trunc_src = source_name if len(source_name) < 28 else "..." + source_name[-25:]
-    draw_text(f"Source: {trunc_src}", color=COLOR_GRAY)
-    
-    # Tracking Stats
-    num_tracks = len(tracker.track_histories)
-    draw_text(f"Active Tracks: {num_tracks}", color=COLOR_GOLD if num_tracks > 0 else COLOR_GRAY, scale=0.45, thickness=1 if num_tracks == 0 else 2)
-    
-    draw_header("TRACKING ENGINE")
-    draw_text(f"Model Name: {os.path.basename(tracker.model.model_name)}")
-    draw_text(f"YOLO Conf: {tracker.conf:.2f}")
-    draw_text(f"Track Buffer: {tracker.track_buffer} frames")
-    draw_text(f"Strict Segment: {tracker.tripwire_strict_segment}")
-    
-    draw_header("TRIPWIRE SETTINGS")
-    dead_pct = int(tracker.dead_zone_width * 100)
-    draw_text(f"Dead Zone: {tracker.dead_zone_width:.3f} ({dead_pct}%)")
-    pt_a = tracker.tripwire_line[0]
-    pt_b = tracker.tripwire_line[1]
-    draw_text(f"Line Point A: ({pt_a[0]:.2f}, {pt_a[1]:.2f})")
-    draw_text(f"Line Point B: ({pt_b[0]:.2f}, {pt_b[1]:.2f})")
-    
-    draw_header("VISUAL LAYERS")
     def get_toggle_str(val):
         return "ON" if val else "OFF"
     def get_toggle_col(val):
         return COLOR_GREEN if val else COLOR_GRAY
-    
-    draw_text(f"[M] Motion ROI:  {get_toggle_str(show_roi)}", color=get_toggle_col(show_roi))
-    draw_text(f"[T] Tripwires:   {get_toggle_str(show_tripwire)}", color=get_toggle_col(show_tripwire))
-    draw_text(f"[H] Trails:      {get_toggle_str(show_history)}", color=get_toggle_col(show_history))
-    
-    draw_header("SHORTCUTS")
-    draw_text("[P] Pause / Resume Playback", color=COLOR_WHITE)
-    draw_text("[R] Reset Tracker State", color=COLOR_WHITE)
-    draw_text("[L] Live Reload config.json", color=COLOR_WHITE)
-    draw_text("[Q / ESC] Close Utility", color=COLOR_WHITE)
+
+    if is_compact:
+        draw_header("CCTV TRACKER HUD", color=COLOR_CYAN)
+        
+        # System Status
+        state_str = "PAUSED" if is_paused else "PLAYING"
+        state_col = COLOR_RED if is_paused else COLOR_GREEN
+        draw_text(f"FPS: {fps:.1f} | Frame: {frame_count}")
+        draw_text(f"State: {state_str}", color=state_col)
+        
+        # Tracking Stats & Details
+        num_tracks = len(tracker.track_histories)
+        draw_text(f"Tracks: {num_tracks}", color=COLOR_GOLD if num_tracks > 0 else COLOR_GRAY)
+        
+        model_base = os.path.basename(tracker.model.model_name)
+        draw_text(f"Model: {model_base}")
+        draw_text(f"YOLO Conf: {tracker.conf:.2f} | Buf: {tracker.track_buffer}")
+        
+        # Tripwire
+        dead_pct = int(tracker.dead_zone_width * 100)
+        pt_a = tracker.tripwire_line[0]
+        pt_b = tracker.tripwire_line[1]
+        draw_text(f"Dead Zone: {dead_pct}%")
+        draw_text(f"A:({pt_a[0]:.2f},{pt_a[1]:.2f}) B:({pt_b[0]:.2f},{pt_b[1]:.2f})", color=COLOR_GRAY)
+        
+        # Visual Layers
+        draw_text(f"ROI:{get_toggle_str(show_roi)} | Trip:{get_toggle_str(show_tripwire)} | Trails:{get_toggle_str(show_history)}")
+        
+        # Shortcuts
+        draw_text("P:Pause | R:Reset", color=COLOR_WHITE)
+        draw_text("L:Reload | Q:Quit", color=COLOR_WHITE)
+    else:
+        # Full Layout
+        draw_header("CCTV OBJECT TRACKER HUD", color=COLOR_CYAN)
+        
+        # System Status
+        draw_text(f"FPS: {fps:.1f}", color=COLOR_GREEN if fps > 5 else COLOR_RED, scale=font_scale, thickness=2 if font_scale >= 0.45 else 1)
+        draw_text(f"Frame Count: {frame_count}")
+        
+        state_str = "PAUSED" if is_paused else "PLAYING"
+        state_col = COLOR_RED if is_paused else COLOR_GREEN
+        draw_text(f"Playback State: {state_str}", color=state_col, scale=font_scale, thickness=2 if font_scale >= 0.45 else 1)
+        
+        # Stream details
+        trunc_src = source_name if len(source_name) < 28 else "..." + source_name[-25:]
+        draw_text(f"Source: {trunc_src}", color=COLOR_GRAY)
+        
+        # Tracking Stats
+        num_tracks = len(tracker.track_histories)
+        draw_text(f"Active Tracks: {num_tracks}", color=COLOR_GOLD if num_tracks > 0 else COLOR_GRAY, scale=font_scale, thickness=1 if num_tracks == 0 else 2)
+        
+        draw_header("TRACKING ENGINE")
+        draw_text(f"Model Name: {os.path.basename(tracker.model.model_name)}")
+        draw_text(f"YOLO Conf: {tracker.conf:.2f}")
+        draw_text(f"Track Buffer: {tracker.track_buffer} frames")
+        draw_text(f"Strict Segment: {tracker.tripwire_strict_segment}")
+        
+        draw_header("TRIPWIRE SETTINGS")
+        dead_pct = int(tracker.dead_zone_width * 100)
+        draw_text(f"Dead Zone: {tracker.dead_zone_width:.3f} ({dead_pct}%)")
+        pt_a = tracker.tripwire_line[0]
+        pt_b = tracker.tripwire_line[1]
+        draw_text(f"Line Point A: ({pt_a[0]:.2f}, {pt_a[1]:.2f})")
+        draw_text(f"Line Point B: ({pt_b[0]:.2f}, {pt_b[1]:.2f})")
+        
+        draw_header("VISUAL LAYERS")
+        draw_text(f"[M] Motion ROI:  {get_toggle_str(show_roi)}", color=get_toggle_col(show_roi))
+        draw_text(f"[T] Tripwires:   {get_toggle_str(show_tripwire)}", color=get_toggle_col(show_tripwire))
+        draw_text(f"[H] Trails:      {get_toggle_str(show_history)}", color=get_toggle_col(show_history))
+        
+        draw_header("SHORTCUTS")
+        draw_text("[P] Pause / Resume Playback", color=COLOR_WHITE)
+        draw_text("[R] Reset Tracker State", color=COLOR_WHITE)
+        draw_text("[L] Live Reload config.json", color=COLOR_WHITE)
+        draw_text("[Q / ESC] Close Utility", color=COLOR_WHITE)
 
 
 def draw_history_trails(frame, tracker):
@@ -236,7 +298,7 @@ def draw_motion_roi(frame):
 
 def reload_config_settings(config_path: str, tracker: ObjectTracker) -> bool:
     """Safely live-reloads configuration file changes and updates the active tracker parameters."""
-    print(f"[*] Reloading configuration from {config_path}...")
+    logger.info(f"Reloading configuration from {config_path}...")
     try:
         os.environ["CCTV_CONFIG_PATH"] = config_path
         
@@ -256,14 +318,17 @@ def reload_config_settings(config_path: str, tracker: ObjectTracker) -> bool:
         
         # Re-create internal custom BoT-SORT YAML tracker config
         tracker._tracker_config_path = tracker._create_tracker_config(tracker.track_buffer, tracker.snapshot_dir)
-        print("[+] Configuration reloaded successfully!")
+        logger.info("Configuration reloaded successfully!")
         return True
     except Exception as e:
-        print(f"[-] Error reloading configuration: {e}")
+        logger.error(f"Error reloading configuration: {e}")
         return False
 
 
 def main():
+    from src.logger import setup_logging
+    setup_logging(log_level="INFO")
+
     parser = argparse.ArgumentParser(description="YOLO Object Tracking Visualization and Calibration Debugger")
     parser.add_argument("--rtsp", type=str, default=CONFIG.rtsp_url,
                         help="RTSP Stream URL or path to offline video file")
@@ -273,12 +338,14 @@ def main():
                         help="Detection confidence threshold")
     parser.add_argument("--track-buffer", type=int, default=CONFIG.track_buffer,
                         help="Track buffer size (frame occlusion limit)")
+    parser.add_argument("--buffer-size", type=int, default=CONFIG.video_buffer_size,
+                        help="OpenCV VideoCapture buffer size")
     parser.add_argument("--config", type=str, default="config.json",
                         help="Path to JSON configuration file")
     args = parser.parse_args()
 
     # Load initial config and set matching tracker settings
-    print(f"[*] Initializing tracker utility with model: {args.model}")
+    logger.info(f"Initializing tracker utility with model: {args.model}")
     tracker = ObjectTracker(
         model_name=args.model,
         tripwire_line=CONFIG.tripwire_line,
@@ -295,13 +362,13 @@ def main():
     video_fps = 30.0
 
     if is_live:
-        print(f"[*] Connecting to live video stream: {args.rtsp}")
-        reader = ThreadedVideoReader(args.rtsp).start()
+        logger.info(f"Connecting to live video stream: {args.rtsp} with buffer size: {args.buffer_size}")
+        reader = ThreadedVideoReader(args.rtsp, buffer_size=args.buffer_size).start()
     else:
-        print(f"[*] Connecting to offline video file: {args.rtsp}")
+        logger.info(f"Connecting to offline video file: {args.rtsp}")
         cap = cv2.VideoCapture(args.rtsp)
         if not cap.isOpened():
-            print(f"[-] Error: Could not open video source '{args.rtsp}'")
+            logger.error(f"Error: Could not open video source '{args.rtsp}'")
             sys.exit(1)
         video_fps = cap.get(cv2.CAP_PROP_FPS)
         if video_fps <= 0 or np.isnan(video_fps) or video_fps > 120.0:
@@ -329,12 +396,22 @@ def main():
         
         if not is_paused:
             if is_live:
+                t_read_start = time.time()
                 ret, frame = reader.read()
+                t_read = time.time() - t_read_start
+                if t_read > 0.1:
+                    logger.warning(f"reader.read() took {t_read * 1000.0:.1f}ms")
+
                 if ret and frame is not None:
                     has_new_frame = True
                     frame_count += 1
                     current_frame = frame.copy()
+                    
+                    t_track_start = time.time()
                     _ = tracker.process_frame(current_frame)
+                    t_track = time.time() - t_track_start
+                    if t_track > 0.1:
+                        logger.warning(f"tracker.process_frame() took {t_track * 1000.0:.1f}ms")
                     
                     fps_frames += 1
                     now = time.time()
@@ -343,17 +420,27 @@ def main():
                         fps_frames = 0
                         last_fps_calc = now
             else:
+                t_read_start = time.time()
                 ret, frame = cap.read()
+                t_read = time.time() - t_read_start
+                if t_read > 0.1:
+                    logger.warning(f"cap.read() took {t_read * 1000.0:.1f}ms")
+
                 if not ret or frame is None:
-                    print("[*] End of stream or failed to grab frame.")
-                    print("[*] Rewinding offline video playback...")
+                    logger.info("End of stream or failed to grab frame.")
+                    logger.info("Rewinding offline video playback...")
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 
                 has_new_frame = True
                 frame_count += 1
                 current_frame = frame.copy()
+                
+                t_track_start = time.time()
                 _ = tracker.process_frame(current_frame)
+                t_track = time.time() - t_track_start
+                if t_track > 0.1:
+                    logger.warning(f"tracker.process_frame() took {t_track * 1000.0:.1f}ms")
                 
                 fps_frames += 1
                 now = time.time()
@@ -368,13 +455,18 @@ def main():
             continue
 
         # If it is live mode, we are not paused, and no new frame arrived:
-        # Pump GUI events briefly and bypass visual rendering to avoid frame hiccups
+        # Pump GUI events briefly and sleep to avoid CPU-starving busy loops
         if is_live and not is_paused and not has_new_frame:
-            key = cv2.waitKey(1) & 0xFF
+            t_wait_start = time.time()
+            key = cv2.waitKey(10) & 0xFF
+            t_wait = time.time() - t_wait_start
+            if t_wait > 0.1:
+                logger.warning(f"cv2.waitKey(10) took {t_wait * 1000.0:.1f}ms")
         else:
             # Draw overlays on top of current frame copy
             frame_draw = current_frame.copy()
             
+            t_render_start = time.time()
             # 1. Render active tracks and bounding boxes
             draw_tracking_boxes(frame_draw, tracker)
             
@@ -397,6 +489,9 @@ def main():
             )
 
             cv2.imshow(window_name, frame_draw)
+            t_render = time.time() - t_render_start
+            if t_render > 0.1:
+                logger.warning(f"rendering/imshow took {t_render * 1000.0:.1f}ms")
             
             # Determine appropriate wait delay
             if is_live:
@@ -405,38 +500,42 @@ def main():
                 elapsed_ms = (time.time() - loop_start_time) * 1000.0
                 wait_time = max(1, int((1000.0 / video_fps) - elapsed_ms))
                 
+            t_wait_start = time.time()
             key = cv2.waitKey(wait_time) & 0xFF
+            t_wait = time.time() - t_wait_start
+            if t_wait > 0.1:
+                logger.warning(f"cv2.waitKey({wait_time}) took {t_wait * 1000.0:.1f}ms")
         
         if key == ord('q') or key == 27:  # Q or ESC
-            print("[*] Exiting visualization utility...")
+            logger.info("Exiting visualization utility...")
             break
             
         elif key == ord('p'):  # P - Pause/Resume Toggle
             is_paused = not is_paused
-            print(f"[*] Playback {'paused' if is_paused else 'resumed'}")
+            logger.info(f"Playback {'paused' if is_paused else 'resumed'}")
             
         elif key == ord('r'):  # R - Reset Tracker State
             tracker.track_histories.clear()
             tracker.track_confirmed_sides.clear()
             tracker.track_last_seen.clear()
-            print("[*] Object tracker state and histories cleared.")
+            logger.info("Object tracker state and histories cleared.")
             
         elif key == ord('m'):  # M - Toggle Motion ROI Rendering
             show_roi = not show_roi
-            print(f"[*] Motion ROI layer visibility: {show_roi}")
+            logger.info(f"Motion ROI layer visibility: {show_roi}")
             
         elif key == ord('t'):  # T - Toggle Tripwires Layer Rendering
             show_tripwire = not show_tripwire
-            print(f"[*] Tripwire visual layer visibility: {show_tripwire}")
+            logger.info(f"Tripwire visual layer visibility: {show_tripwire}")
             
         elif key == ord('h'):  # H - Toggle Track History Trails Rendering
             show_history = not show_history
-            print(f"[*] Tracking history trails layer visibility: {show_history}")
+            logger.info(f"Tracking history trails layer visibility: {show_history}")
             
         elif key == ord('l'):  # L - Live Reload Configuration
             success = reload_config_settings(args.config, tracker)
             if not success:
-                print("[-] Failed to live reload settings from configuration file.")
+                logger.error("Failed to live reload settings from configuration file.")
 
     if is_live:
         reader.stop()

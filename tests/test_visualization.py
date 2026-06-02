@@ -39,3 +39,36 @@ def test_compute_dead_zone_lines_zero_length():
     assert ins_B == (10, 10)
     assert out_A == (10, 10)
     assert out_B == (10, 10)
+
+def test_draw_hud_sidebar_resolutions():
+    from unittest.mock import MagicMock
+    import numpy as np
+    from visualize_tracker import draw_hud_sidebar
+
+    mock_tracker = MagicMock()
+    mock_tracker.track_histories = {}
+    mock_tracker.model = MagicMock()
+    mock_tracker.model.model_name = "yolov8n.pt"
+    mock_tracker.conf = 0.25
+    mock_tracker.track_buffer = 30
+    mock_tracker.tripwire_strict_segment = True
+    mock_tracker.dead_zone_width = 0.1
+    mock_tracker.tripwire_line = ((0.1, 0.2), (0.9, 0.8))
+
+    # Test full mode (e.g. 1920x1080)
+    frame_full = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    draw_hud_sidebar(
+        frame_full, mock_tracker, is_paused=False, show_roi=True,
+        show_tripwire=True, show_history=True, fps=30.0, frame_count=100,
+        source_name="rtsp://test_stream"
+    )
+    assert not np.all(frame_full == 0)
+
+    # Test compact mode (e.g. 640x360)
+    frame_compact = np.zeros((360, 640, 3), dtype=np.uint8)
+    draw_hud_sidebar(
+        frame_compact, mock_tracker, is_paused=True, show_roi=False,
+        show_tripwire=False, show_history=False, fps=15.0, frame_count=500,
+        source_name="rtsp://test_stream_low_res"
+    )
+    assert not np.all(frame_compact == 0)
