@@ -12,6 +12,7 @@ from typing import Tuple, List, Optional
 from src.config import CONFIG, load_config
 from src.object_tracker import ObjectTracker
 from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines
+from src.pipeline import ThreadedVideoReader
 
 # Define a premium color scheme (BGR format)
 COLOR_CYAN = (255, 235, 0)
@@ -278,11 +279,19 @@ def main():
         track_buffer=args.track_buffer
     )
 
-    print(f"[*] Connecting to video stream/source: {args.rtsp}")
-    cap = cv2.VideoCapture(args.rtsp)
-    if not cap.isOpened():
-        print(f"[-] Error: Could not open video source '{args.rtsp}'")
-        sys.exit(1)
+    is_live = args.rtsp.startswith("rtsp://") or args.rtsp.startswith("rtmp://")
+    reader = None
+    cap = None
+
+    if is_live:
+        print(f"[*] Connecting to live video stream: {args.rtsp}")
+        reader = ThreadedVideoReader(args.rtsp).start()
+    else:
+        print(f"[*] Connecting to offline video file: {args.rtsp}")
+        cap = cv2.VideoCapture(args.rtsp)
+        if not cap.isOpened():
+            print(f"[-] Error: Could not open video source '{args.rtsp}'")
+            sys.exit(1)
 
     # State variables
     is_paused = False
@@ -302,32 +311,42 @@ def main():
 
     while True:
         if not is_paused:
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                print("[*] End of stream or failed to grab frame.")
-                # If it's a loopable local file, we can rewind it!
-                if not args.rtsp.startswith("rtsp://") and not args.rtsp.startswith("rtmp://"):
+            if is_live:
+                ret, frame = reader.read()
+                if ret and frame is not None:
+                    frame_count += 1
+                    current_frame = frame.copy()
+                    _ = tracker.process_frame(current_frame)
+                    
+                    fps_frames += 1
+                    now = time.time()
+                    if now - last_fps_calc >= 1.0:
+                        fps = fps_frames / (now - last_fps_calc)
+                        fps_frames = 0
+                        last_fps_calc = now
+            else:
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    print("[*] End of stream or failed to grab frame.")
                     print("[*] Rewinding offline video playback...")
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
-                else:
-                    break
-            
-            frame_count += 1
-            current_frame = frame.copy()
-            
-            # Feed frame to ObjectTracker. Runs YOLO inference and crossing detection.
-            # We ignore returned CrossingEvents as they are logged to database in main pipeline.
-            # We only run the engine to populate the raw tracking boxes.
-            _ = tracker.process_frame(current_frame)
-            
-            # Update processing FPS calculations
-            fps_frames += 1
-            now = time.time()
-            if now - last_fps_calc >= 1.0:
-                fps = fps_frames / (now - last_fps_calc)
-                fps_frames = 0
-                last_fps_calc = now
+                
+                frame_count += 1
+                current_frame = frame.copy()
+                _ = tracker.process_frame(current_frame)
+                
+                fps_frames += 1
+                now = time.time()
+                if now - last_fps_calc >= 1.0:
+                    fps = fps_frames / (now - last_fps_calc)
+                    fps_frames = 0
+                    last_fps_calc = now
+
+        if current_frame is None:
+            # Wait a bit for the first frame
+            time.sleep(0.01)
+            continue
 
         # Draw overlays on top of current frame copy
         frame_draw = current_frame.copy()
@@ -389,7 +408,10 @@ def main():
             if not success:
                 print("[-] Failed to live reload settings from configuration file.")
 
-    cap.release()
+    if is_live:
+        reader.stop()
+    else:
+        cap.release()
     cv2.destroyAllWindows()
 
 
