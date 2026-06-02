@@ -89,22 +89,79 @@ PYTHONPATH=src pytest
 
 ---
 
-## ⚙️ Environment Variables Config
+## ⚙️ Configuration
 
-You can customize runtime parameters using environment variables without editing the source code:
+The system is highly configurable. You can specify settings via a JSON configuration file (e.g., `config.json`) and/or individual environment variables.
 
-| Env Variable | Default Value | Description |
-| :--- | :--- | :--- |
-| `CCTV_RTSP_URL` | `rtsp://localhost:8554/nest-cam` | The local camera stream URL. |
-| `CCTV_FPS_LIMIT` | `10` | Target frames per second to process. |
-| `CCTV_MOTION_THRESHOLD` | `0.005` | Percent of changed pixels (0.0 to 1.0) to trigger motion state. |
-| `CCTV_MIN_CONTOUR_AREA` | `500` | Minimum pixel area of a moving object. |
-| `CCTV_MOTION_COOLDOWN` | `150` | How many frames of silence before shutting off YOLO. |
-| `CCTV_DB_PATH` | `db/presence.db` | Path to the SQLite presence database. |
-| `CCTV_SNAPSHOT_DIR` | `snapshots` | Folder path where face/body crops are stored. |
-| `CCTV_DEAD_ZONE_WIDTH` | `0.05` | Width of the hysteresis dead zone around the tripwire, as a fraction of frame height (0.0 to 1.0). The centroid must move beyond half this width on the far side of the line to register a crossing. |
-| `CCTV_WEBHOOK_URLS` | `[]` | Comma-separated list or JSON list of Webhook HTTP POST URLs to trigger. |
-| `CCTV_WEBHOOK_TIMEOUT` | `5` | Timeout in seconds for webhook requests. |
+### Precedence Order
+1. **Environment Variables**: Individual environment variables (e.g., `CCTV_RTSP_URL`) override JSON configuration and default values.
+2. **JSON Config File**: Values loaded from `config.json` (or the path defined by the `CCTV_CONFIG_PATH` environment variable) override defaults.
+3. **Defaults**: Standard fallback configurations defined in [src/config.py](src/config.py).
+
+---
+
+### Configuration Options Reference
+
+#### 🎥 Video & Stream Settings
+
+| JSON Key | Env Variable | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `rtsp_url` | `CCTV_RTSP_URL` | `rtsp://localhost:8554/nest-cam` | RTSP URL for the camera stream. |
+| `fps_limit` | `CCTV_FPS_LIMIT` | `10` | Target frames per second to process. |
+| `video_buffer_size` | `CCTV_VIDEO_BUFFER_SIZE` | `1` | Size of the OpenCV `VideoCapture` buffer queue. |
+
+#### 🧠 YOLO & Tracking Settings
+
+| JSON Key | Env Variable | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `model_name` | `CCTV_MODEL_NAME` | `yolov8n.pt` | YOLO model configuration name or local `.pt` path. |
+| `yolo_imgsz` | `CCTV_YOLO_IMGSZ` | `640` | Image size (resolution) for YOLO inference. |
+| `yolo_device` | `CCTV_YOLO_DEVICE` | `null` | Device to run YOLO model on (e.g., `'cpu'`, `'cuda'`, `'0'`). |
+| `tracker_confidence` | `CCTV_TRACKER_CONFIDENCE` | `0.1` | Minimum detection confidence threshold for YOLO person detections. |
+| `track_buffer` | `CCTV_TRACK_BUFFER` | `30` | Number of frames to keep lost tracks alive before reassigning a new tracker ID. At 10 FPS, defaults to 3 seconds. |
+
+#### 🏃 Motion Detection Settings (Fast Stage)
+
+| JSON Key | Env Variable | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `motion_threshold` | `CCTV_MOTION_THRESHOLD` | `0.005` | Fraction of changed pixels (0.0 to 1.0) to trigger motion state. |
+| `motion_min_contour_area` | `CCTV_MIN_CONTOUR_AREA` | `500` | Minimum pixel area of a moving contour to trigger motion state. |
+| `background_alpha` | `CCTV_BACKGROUND_ALPHA` | `0.05` | Accumulator update speed (alpha) for background subtraction. |
+| `motion_cooldown_frames` | `CCTV_MOTION_COOLDOWN` | `150` | Number of idle frames before returning to the fast motion detection stage. |
+| `motion_roi` | `CCTV_MOTION_ROI` | `null` | Region of interest for motion detection. Array of normalized coordinates, e.g. `[[x1,y1],[x2,y2],...]`. If `null`, uses full frame. |
+
+#### 📐 Tripwire & Line-Crossing Settings
+
+| JSON Key | Env Variable | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `tripwire_line` | `CCTV_TRIPWIRE_LINE` | `[[0.2, 0.5], [0.8, 0.5]]` | Coordinates of the tripwire line segment `[[x1, y1], [x2, y2]]` normalized between `0.0` and `1.0`. |
+| `tripwire_dead_zone_width` | `CCTV_DEAD_ZONE_WIDTH` | `0.05` | Width of the hysteresis dead zone around the tripwire, as a fraction of frame height. |
+| `tripwire_strict_segment` | `CCTV_TRIPWIRE_STRICT_SEGMENT` | `false` | If `true`, requires the centroid projection to fall strictly within the tripwire line segment to register a crossing. |
+
+#### 🌐 API Server & Stream Control Settings
+
+| JSON Key | Env Variable | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `host` | `CCTV_HOST` | `0.0.0.0` | IP address to bind the API server. |
+| `port` | `CCTV_PORT` | `8000` | Port to bind the API server. |
+| `trigger_mode` | `CCTV_TRIGGER_MODE` | `continuous` | Trigger mode: `'continuous'` (processing active) or `'event'` (keeps YOLO/ByteTrack stream active after trigger event). |
+| `event_stream_duration` | `CCTV_EVENT_STREAM_DURATION` | `45` | Duration in seconds to keep stream active after a trigger event in `'event'` trigger mode. |
+
+#### 📝 Logging, Database, & Storage Settings
+
+| JSON Key | Env Variable | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `log_level` | `CCTV_LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL). |
+| `log_file` | `CCTV_LOG_FILE` | `logs/cctv.log` | Path to log file. Use `null` or empty to disable file logging. |
+| `db_path` | `CCTV_DB_PATH` | `db/presence.db` | Path to SQLite presence database file. |
+| `snapshot_dir` | `CCTV_SNAPSHOT_DIR` | `snapshots` | Directory path where face/body crops are stored. |
+
+#### 🔗 Webhook Settings
+
+| JSON Key | Env Variable | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `webhook_urls` | `CCTV_WEBHOOK_URLS` | `[]` | List/Array of webhook URLs (or comma-separated list/JSON array via Env) to trigger on events. |
+| `webhook_timeout` | `CCTV_WEBHOOK_TIMEOUT` | `5` | Timeout in seconds for webhook requests. |
 
 ---
 
@@ -115,6 +172,19 @@ To start both the API server and the background camera-monitoring pipeline:
 source venv/bin/activate
 python run.py --rtsp "rtsp://localhost:8554/nest-cam"
 ```
+
+### CLI Arguments for `run.py`
+
+You can customize the daemon at startup using the following command-line flags:
+
+* `--rtsp`: RTSP stream URL (overrides `CCTV_RTSP_URL`).
+* `--tripwire`: Overrides the tripwire line segment. Accepts a JSON array `[[x1,y1],[x2,y2]]` or a comma-separated list of 4 floats `x1,y1,x2,y2`.
+* `--roi`: Overrides the motion ROI polygon. Accepts a JSON array of coordinate pairs `[[x1,y1],[x2,y2],...]` or a comma-separated list of floats `x1,y1,x2,y2,...`.
+* `--model`: YOLO model name or local path (overrides `CCTV_MODEL_NAME`).
+* `--host`: Host to bind the FastAPI server to (overrides `CCTV_HOST`).
+* `--port`: Port to bind the FastAPI server to (overrides `CCTV_PORT`).
+* `--no-api`: Starts the stream-monitoring pipeline thread but disables the FastAPI web server.
+* `--no-pipeline`: Starts the FastAPI web server but disables the background stream-monitoring pipeline.
 
 ### Event Webhooks
 
@@ -143,6 +213,68 @@ If any configured webhook fails (due to connection timeout, DNS resolution issue
 * **Manual Override/Reset**: `POST http://localhost:8000/reset`
   * Body: `{"is_someone_home": false, "current_occupancy": 0}`
 * **Fetch Event Snapshots**: Files can be served directly from `/snapshots/...` (e.g., `http://localhost:8000/snapshots/enter_id9_20260522_210145_390123.jpg`).
+
+---
+
+## 🛠 Calibration & Debugging Utilities
+
+The repository provides two OpenCV-based graphical utilities to help calibrate tripwires/regions of interest and visualize YOLO tracking behavior in real-time.
+
+> [!NOTE]
+> Since these tools use OpenCV GUI features (`cv2.imshow`), they must be run in a desktop environment or a system with X11 forwarding enabled. They will not function on headless environments without a display server.
+
+### 1. Calibration Tool (`calibrate.py`)
+
+[calibrate.py](calibrate.py) allows you to visually draw and configure the tripwire line segment or the motion detection Region of Interest (ROI) polygon directly on a camera stream frame.
+
+#### Usage
+To calibrate the **tripwire line**:
+```bash
+python calibrate.py --rtsp "rtsp://localhost:8554/nest-cam" --mode tripwire
+```
+
+To calibrate the **motion ROI polygon**:
+```bash
+python calibrate.py --rtsp "rtsp://localhost:8554/nest-cam" --mode roi
+```
+
+#### Controls
+* **Left Click**: Place Point A and B (in `tripwire` mode) or vertices (in `roi` mode).
+* **[Enter]**: Close the polygon (in `roi` mode, requires at least 3 vertices).
+* **[S]**: Save the coordinates directly to `config.json` under `tripwire_line` or `motion_roi` as normalized coordinates.
+* **[R]**: Reset the current drawing.
+* **[Q] or [ESC]**: Quit the calibration tool without saving.
+
+---
+
+### 2. Tracker Visualization Utility (`visualize_tracker.py`)
+
+[visualize_tracker.py](visualize_tracker.py) is a real-time visualization tool that displays the YOLO bounding boxes, active tracking IDs, centroid history paths, tripwire lines, dead zones, and motion ROI polygons. It includes a comprehensive sidebar HUD showing live performance metrics.
+
+#### Usage
+```bash
+python visualize_tracker.py --rtsp "rtsp://localhost:8554/nest-cam"
+```
+You can also run it against offline video files (e.g., for testing and development):
+```bash
+python visualize_tracker.py --rtsp "path/to/test_video.mp4"
+```
+
+#### CLI Options
+* `--rtsp`: RTSP stream URL or path to offline video file (defaults to `CCTV_RTSP_URL`).
+* `--model`: YOLO model name or path to a local `.pt` weight file (defaults to `CCTV_MODEL_NAME`).
+* `--conf`: Confidence threshold for detections (defaults to `tracker_confidence`).
+* `--track-buffer`: Frame limit to keep lost tracks alive (defaults to `track_buffer`).
+* `--config`: Path to the config JSON file to use or live-reload (defaults to `config.json`).
+
+#### Real-time Keyboard Shortcuts
+* **[P]**: Pause / Resume video playback.
+* **[R]**: Reset the object tracker's active states and history trails.
+* **[L]**: Live-reload parameters (like tripwire positions, thresholds) directly from `config.json` without restarting the script.
+* **[M]**: Toggle visibility of the Motion ROI layer.
+* **[T]**: Toggle visibility of the Tripwire & Dead Zone layers.
+* **[H]**: Toggle visibility of the historical centroid trail layers.
+* **[Q] or [ESC]**: Quit the utility.
 
 ---
 
