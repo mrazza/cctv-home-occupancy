@@ -14,6 +14,7 @@
         [0.8, 0.5]
     ],
     "tripwire_dead_zone_width": 0.05,
+    "tripwire_strict_segment": false,
     "db_path": "db/presence.db",
     "snapshot_dir": "snapshots",
     "webhook_urls": [],

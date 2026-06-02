@@ -102,23 +102,14 @@ class DatabaseManager:
                 """, (event_type, tracker_id, confidence, now, snapshot_path, session_id))
                 event_id = cursor.lastrowid
                 
-                # Fetch current occupancy
-                cursor = conn.execute("SELECT current_occupancy FROM presence_state WHERE id = 1")
-                row = cursor.fetchone()
-                current_count = row["current_occupancy"] if row else 0
-                
-                # Calculate new occupancy, enforcing non-negative values
-                new_count = max(0, current_count + delta)
-                is_home = 1 if new_count > 0 else 0
-                
-                # Update state
+                # Update state atomically using SQLite MAX and CASE to avoid check-then-act race conditions
                 conn.execute("""
                     UPDATE presence_state
-                    SET is_someone_home = ?,
-                        current_occupancy = ?,
+                    SET current_occupancy = MAX(0, current_occupancy + ?),
+                        is_someone_home = CASE WHEN MAX(0, current_occupancy + ?) > 0 THEN 1 ELSE 0 END,
                         last_updated = ?
                     WHERE id = 1
-                """, (is_home, new_count, now))
+                """, (delta, delta, now))
                 
                 conn.commit()
                 return event_id

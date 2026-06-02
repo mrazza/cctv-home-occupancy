@@ -42,6 +42,11 @@ class CameraConfig(BaseModel):
                     "The centroid must move beyond half this width on the far side of the line to register a crossing. "
                     "Set to 0.0 to disable the dead zone."
     )
+    tripwire_strict_segment: bool = Field(
+        default=False,
+        description="If true, requires the centroid projection to fall strictly within the tripwire line segment to register a crossing."
+                    "If false, treats the tripwire as an infinite line."
+    )
     tracker_confidence: float = Field(
         default=0.1,
         description="Minimum detection confidence threshold for YOLO person detections (0.0 to 1.0). "
@@ -95,6 +100,7 @@ def load_config() -> CameraConfig:
         "CCTV_SNAPSHOT_DIR": ("snapshot_dir", str),
         "CCTV_WEBHOOK_TIMEOUT": ("webhook_timeout", int),
         "CCTV_DEAD_ZONE_WIDTH": ("tripwire_dead_zone_width", float),
+        "CCTV_TRIPWIRE_STRICT_SEGMENT": ("tripwire_strict_segment", lambda x: str(x).lower() in ("true", "1", "yes")),
         "CCTV_TRACKER_CONFIDENCE": ("tracker_confidence", float),
         "CCTV_TRACK_BUFFER": ("track_buffer", int),
     }

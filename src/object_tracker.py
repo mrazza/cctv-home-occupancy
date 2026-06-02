@@ -20,6 +20,7 @@ class ObjectTracker:
                  tripwire_line: Optional[List[Tuple[float, float]]] = None,
                  snapshot_dir: str = "snapshots",
                  dead_zone_width: float = 0.0,
+                 tripwire_strict_segment: bool = False,
                  conf: float = 0.25,
                  track_buffer: int = 30):
         """
@@ -45,7 +46,9 @@ class ObjectTracker:
         self.tripwire_line = tripwire_line or [(0.2, 0.5), (0.8, 0.5)]
         self.snapshot_dir = snapshot_dir
         self.dead_zone_width = dead_zone_width
+        self.tripwire_strict_segment = tripwire_strict_segment
         self.conf = conf
+        self.track_buffer = track_buffer
         os.makedirs(self.snapshot_dir, exist_ok=True)
         
         # Generate a custom tracker config with the specified track_buffer
@@ -56,6 +59,10 @@ class ObjectTracker:
         self.track_histories: Dict[int, List[Tuple[float, float]]] = {}
         # Track confirmed side state: mapping of tracker_id -> last known confirmed side (+1 or -1 or 0)
         self.track_confirmed_sides: Dict[int, int] = {}
+        # Track last seen frame count to implement TTL buffer
+        self.track_last_seen: Dict[int, int] = {}
+        # Internal frame counter
+        self.frame_count: int = 0
 
     @staticmethod
     def _create_tracker_config(track_buffer: int, snapshot_dir: str) -> str:
@@ -112,6 +119,26 @@ with_reid: false
             return 0.0
         return (dx * (P[1] - A[1]) - dy * (P[0] - A[0])) / line_len
 
+    def _is_point_in_segment_bounds(self, A: Tuple[float, float], B: Tuple[float, float], P: Tuple[float, float]) -> bool:
+        """
+        Checks if the projection of point P onto the line defined by AB falls within the line segment AB.
+        """
+        # Calculate dot product of AB and AP
+        dot_product = (P[0] - A[0]) * (B[0] - A[0]) + (P[1] - A[1]) * (B[1] - A[1])
+        # Squared length of segment AB
+        segment_len_sq = (B[0] - A[0]) ** 2 + (B[1] - A[1]) ** 2
+        
+        if segment_len_sq < 1e-9:
+            return False
+            
+        # The projection of P onto the line AB is defined by A + t * AB where t = dot_product / segment_len_sq
+        t = dot_product / segment_len_sq
+        
+        # If t is between 0 and 1, the projection falls on the segment
+        # We allow a small margin (e.g. -0.1 to 1.1) to account for bounding box width, or strictly 0.0 to 1.0.
+        # Let's use -0.1 to 1.1 to be slightly lenient at the doorway edges.
+        return -0.1 <= t <= 1.1
+
     def save_crop(self, frame: np.ndarray, bbox: Tuple[int, int, int, int], tracker_id: int, event_type: str) -> Optional[str]:
         """Saves a high-resolution crop of the person bounding box for future face recognition."""
         try:
@@ -141,6 +168,7 @@ with_reid: false
             List of detected crossing events:
             [CrossingEvent(event_type="ENTER"/"LEAVE", tracker_id=id, confidence=conf, snapshot_path=path)]
         """
+        self.frame_count += 1
         h, w, _ = frame.shape
         
         # Compute dead zone threshold in pixel space (based on frame height)
@@ -172,6 +200,7 @@ with_reid: false
 
                 for i, tracker_id in enumerate(tracker_ids):
                     active_tracker_ids.add(tracker_id)
+                    self.track_last_seen[tracker_id] = self.frame_count
                     x1, y1, x2, y2 = xyxy[i]
                     conf = confidences[i]
                     
@@ -193,24 +222,31 @@ with_reid: false
                     signed_dist = self._get_signed_distance(A, B, curr_point)
                     
                     event_type = None
-                    # Hysteresis crossing logic:
-                    # Centroid must cross to the opposite side and exceed the dead zone boundary.
-                    if confirmed_side == -1 and signed_dist > dead_zone_half_px:
-                        event_type = "ENTER"
-                        self.track_confirmed_sides[tracker_id] = 1
-                        logger.info(f"Tracker {tracker_id} crossed tripwire: OUTSIDE -> INSIDE (ENTER), signed_dist: {signed_dist:.1f}, dead_zone_half: {dead_zone_half_px:.1f}")
-                    elif confirmed_side == 1 and signed_dist < -dead_zone_half_px:
-                        event_type = "LEAVE"
-                        self.track_confirmed_sides[tracker_id] = -1
-                        logger.info(f"Tracker {tracker_id} crossed tripwire: INSIDE -> OUTSIDE (LEAVE), signed_dist: {signed_dist:.1f}, dead_zone_half: {dead_zone_half_px:.1f}")
-                    elif confirmed_side == 0:
-                        # If initially collinear, commit to whichever side the centroid moves towards
-                        if signed_dist > dead_zone_half_px:
+                    
+                    # If strict segment mode is enabled, ignore crossings where the person is outside the doorway bounds
+                    in_bounds = True
+                    if self.tripwire_strict_segment:
+                        in_bounds = self._is_point_in_segment_bounds(A, B, curr_point)
+                    
+                    if in_bounds:
+                        # Hysteresis crossing logic:
+                        # Centroid must cross to the opposite side and exceed the dead zone boundary.
+                        if confirmed_side == -1 and signed_dist > dead_zone_half_px:
+                            event_type = "ENTER"
                             self.track_confirmed_sides[tracker_id] = 1
-                            logger.info(f"Tracker {tracker_id} resolved from COLLINEAR -> INSIDE (+1), signed_dist: {signed_dist:.1f}")
-                        elif signed_dist < -dead_zone_half_px:
+                            logger.info(f"Tracker {tracker_id} crossed tripwire: OUTSIDE -> INSIDE (ENTER), signed_dist: {signed_dist:.1f}, dead_zone_half: {dead_zone_half_px:.1f}")
+                        elif confirmed_side == 1 and signed_dist < -dead_zone_half_px:
+                            event_type = "LEAVE"
                             self.track_confirmed_sides[tracker_id] = -1
-                            logger.info(f"Tracker {tracker_id} resolved from COLLINEAR -> OUTSIDE (-1), signed_dist: {signed_dist:.1f}")
+                            logger.info(f"Tracker {tracker_id} crossed tripwire: INSIDE -> OUTSIDE (LEAVE), signed_dist: {signed_dist:.1f}, dead_zone_half: {dead_zone_half_px:.1f}")
+                        elif confirmed_side == 0:
+                            # If initially collinear, commit to whichever side the centroid moves towards
+                            if signed_dist > dead_zone_half_px:
+                                self.track_confirmed_sides[tracker_id] = 1
+                                logger.info(f"Tracker {tracker_id} resolved from COLLINEAR -> INSIDE (+1), signed_dist: {signed_dist:.1f}")
+                            elif signed_dist < -dead_zone_half_px:
+                                self.track_confirmed_sides[tracker_id] = -1
+                                logger.info(f"Tracker {tracker_id} resolved from COLLINEAR -> OUTSIDE (-1), signed_dist: {signed_dist:.1f}")
                             
                     if event_type:
                         bbox = (int(x1), int(y1), int(x2), int(y2))
@@ -228,13 +264,21 @@ with_reid: false
                         self.track_histories[tracker_id].pop(0)
 
         # Cleanup old tracking histories that are no longer active to prevent memory leaks
-        dead_ids = [tid for tid in self.track_histories if tid not in active_tracker_ids]
+        # We use a TTL buffer so we only delete tracks that haven't been seen for track_buffer frames.
+        dead_ids = []
+        for tid in self.track_histories:
+            last_seen = self.track_last_seen.get(tid, 0)
+            if tid not in active_tracker_ids and (self.frame_count - last_seen) > self.track_buffer:
+                dead_ids.append(tid)
+                
         for tid in dead_ids:
             last_side = self.track_confirmed_sides.get(tid)
             side_label = {1: "INSIDE", -1: "OUTSIDE", 0: "COLLINEAR"}.get(last_side, str(last_side))
-            logger.info(f"Tracker {tid} lost (no longer active). Last confirmed side: {side_label}. Cleaning up.")
+            logger.info(f"Tracker {tid} lost (no longer active for >{self.track_buffer} frames). Last confirmed side: {side_label}. Cleaning up.")
             del self.track_histories[tid]
             if tid in self.track_confirmed_sides:
                 del self.track_confirmed_sides[tid]
+            if tid in self.track_last_seen:
+                del self.track_last_seen[tid]
 
         return events

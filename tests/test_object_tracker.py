@@ -117,11 +117,18 @@ def test_process_frame_crossing_events(temp_dir):
         events_f3 = tracker.process_frame(frame)
         assert events_f3 == []
 
-        # Frame 4: Track 1 disappears (clean up dead tracks)
+        # Frame 4: Track 1 disappears (but history is kept due to TTL buffer)
         boxes_f4 = MockBoxes([], [], [])
         mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f4)]
         events_f4 = tracker.process_frame(frame)
         assert events_f4 == []
+        assert 1 in tracker.track_histories
+
+        # Fast forward frames to exceed track_buffer (30 by default)
+        for _ in range(35):
+            tracker.process_frame(frame)
+        
+        # Now it should be cleaned up
         assert 1 not in tracker.track_histories
 
 
@@ -344,4 +351,99 @@ def test_signed_distance_method():
     
     P_right = (4.0, 5.0)
     assert tracker._get_signed_distance(C, D, P_right) == pytest.approx(-4.0)
+
+def test_track_recovery_prevents_duplicate_events(temp_dir):
+    """Verifies that if a track drops for a frame and recovers, it retains its confirmed side and doesn't trigger duplicate events."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        # Tripwire at y = 0.5 horizontal, dead_zone_width = 0.2
+        tracker = ObjectTracker(
+            tripwire_line=[(0.0, 0.5), (1.0, 0.5)],
+            snapshot_dir=temp_dir,
+            dead_zone_width=0.2
+        )
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        
+        all_events = []
+        
+        # Frame 1: Person starts inside (centroid y = 80, inside is +1, outside is -1)
+        # Bounding box y centers: 80
+        boxes_f1 = MockBoxes([[40, 70, 60, 90]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
+        all_events.extend(tracker.process_frame(frame))
+        
+        # Frame 2: Person crosses to outside (centroid y = 20) -> LEAVE
+        boxes_f2 = MockBoxes([[40, 10, 60, 30]], [1], [0.96])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f2)]
+        all_events.extend(tracker.process_frame(frame))
+        
+        # Frame 3: YOLO drops the track (e.g. occlusion)
+        boxes_f3 = MockBoxes([], [], [])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f3)]
+        all_events.extend(tracker.process_frame(frame))
+        
+        # Frame 4: YOLO recovers the track with same ID (track buffer), but jitter makes it centroid y=52 (inside dead zone)
+        # Wait, if y=52, it's slightly "inside" the absolute center y=50, but within dead zone (40-60).
+        boxes_f4 = MockBoxes([[40, 42, 60, 62]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f4)]
+        all_events.extend(tracker.process_frame(frame))
+        
+        # Frame 5: Person moves fully outside again (y=20)
+        boxes_f5 = MockBoxes([[40, 10, 60, 30]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f5)]
+        all_events.extend(tracker.process_frame(frame))
+        
+        # Assert only 1 LEAVE event was triggered (the original one)
+        assert len(all_events) == 1
+        assert all_events[0].event_type == "LEAVE"
+
+def test_strict_segment_ignores_out_of_bounds_crossing(temp_dir):
+    """Verifies that with tripwire_strict_segment=True, crossings outside the segment bounds are ignored."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        # Segment from x=0.2 to x=0.8 (pixels 20 to 80).
+        tracker_strict = ObjectTracker(
+            tripwire_line=[(0.2, 0.5), (0.8, 0.5)],
+            snapshot_dir=temp_dir,
+            tripwire_strict_segment=True
+        )
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        
+        # Person crosses at x=90 (outside the segment bounds 20-80).
+        # Frame 1: inside
+        boxes_f1 = MockBoxes([[85, 70, 95, 90]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
+        tracker_strict.process_frame(frame)
+        
+        # Frame 2: crosses outside
+        boxes_f2 = MockBoxes([[85, 10, 95, 30]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f2)]
+        events = tracker_strict.process_frame(frame)
+        
+        # Should be ignored
+        assert len(events) == 0
+
+def test_infinite_line_allows_out_of_bounds_crossing(temp_dir):
+    """Verifies that with tripwire_strict_segment=False, crossings outside the segment bounds trigger events."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        # Segment from x=0.2 to x=0.8 (pixels 20 to 80).
+        tracker_inf = ObjectTracker(
+            tripwire_line=[(0.2, 0.5), (0.8, 0.5)],
+            snapshot_dir=temp_dir,
+            tripwire_strict_segment=False
+        )
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        
+        # Person crosses at x=90 (outside the segment bounds 20-80).
+        # Frame 1: inside
+        boxes_f1 = MockBoxes([[85, 70, 95, 90]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
+        tracker_inf.process_frame(frame)
+        
+        # Frame 2: crosses outside
+        boxes_f2 = MockBoxes([[85, 10, 95, 30]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f2)]
+        events = tracker_inf.process_frame(frame)
+        
+        # Should trigger event
+        assert len(events) == 1
+        assert events[0].event_type == "LEAVE"
 
