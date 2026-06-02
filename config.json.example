@@ -1,5 +1,6 @@
 {
     "rtsp_url": "rtsp://localhost:8554/nest-cam",
+    "model_name": "yolov8n.pt",
     "fps_limit": 10,
     "host": "0.0.0.0",
     "port": 8000,

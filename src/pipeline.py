@@ -145,7 +145,15 @@ class PipelineOrchestrator:
             alpha=CONFIG.background_alpha,
             roi=CONFIG.motion_roi
         )
-        self.object_tracker = object_tracker or ObjectTracker()
+        self.object_tracker = object_tracker or ObjectTracker(
+            model_name=CONFIG.model_name,
+            tripwire_line=CONFIG.tripwire_line,
+            snapshot_dir=CONFIG.snapshot_dir,
+            dead_zone_width=CONFIG.tripwire_dead_zone_width,
+            tripwire_strict_segment=CONFIG.tripwire_strict_segment,
+            conf=CONFIG.tracker_confidence,
+            track_buffer=CONFIG.track_buffer
+        )
         self.cooldown_frames = cooldown_frames
         self.fps_limit = fps_limit
         

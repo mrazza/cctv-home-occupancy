@@ -30,6 +30,8 @@ def main():
                         help="Coordinates of the tripwire as a comma-separated list of four floats (x1,y1,x2,y2) or JSON string")
     parser.add_argument("--roi", type=str, default=None,
                         help="Coordinates of the motion detection ROI as a comma-separated list of four floats (x1,y1,x2,y2) or JSON string")
+    parser.add_argument("--model", type=str, default=CONFIG.model_name,
+                        help="YOLO model configuration name or local PT path")
     parser.add_argument("--host", type=str, default=CONFIG.host, help="FastAPI host")
     parser.add_argument("--port", type=int, default=CONFIG.port, help="FastAPI port")
     parser.add_argument("--no-api", action="store_true", help="Disable the FastAPI server")
@@ -94,6 +96,7 @@ def main():
         # Pass custom tripwire_line override to object tracker
         from src.object_tracker import ObjectTracker
         tracker = ObjectTracker(
+            model_name=args.model,
             tripwire_line=tripwire_line,
             snapshot_dir=CONFIG.snapshot_dir,
             dead_zone_width=CONFIG.tripwire_dead_zone_width,

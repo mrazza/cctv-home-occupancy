@@ -114,9 +114,7 @@ dmypy.json
 cython_debug/
 
 # YOLO models downloaded dynamically
-yolov8n.pt
-yolov11n.pt
-yolo26n.pt
+yolo*.pt
 
 # Application SQLite DBs
 db/

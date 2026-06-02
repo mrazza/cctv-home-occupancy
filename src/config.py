@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class CameraConfig(BaseModel):
     rtsp_url: str = Field(default="rtsp://localhost:8554/nest-cam", description="RTSP URL for the camera stream")
+    model_name: str = Field(default="yolov8n.pt", description="YOLO model configuration name or local PT path")
     fps_limit: int = Field(default=10, description="Target frames per second to process")
     
     # API Server Settings
@@ -85,6 +86,7 @@ def load_config() -> CameraConfig:
     # 2. Override from Environment Variables
     env_mappings = {
         "CCTV_RTSP_URL": ("rtsp_url", str),
+        "CCTV_MODEL_NAME": ("model_name", str),
         "CCTV_FPS_LIMIT": ("fps_limit", int),
         "CCTV_HOST": ("host", str),
         "CCTV_PORT": ("port", int),

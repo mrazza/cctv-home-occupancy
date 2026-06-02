@@ -257,7 +257,7 @@ def main():
     parser = argparse.ArgumentParser(description="YOLO Object Tracking Visualization and Calibration Debugger")
     parser.add_argument("--rtsp", type=str, default=CONFIG.rtsp_url,
                         help="RTSP Stream URL or path to offline video file")
-    parser.add_argument("--model", type=str, default="yolov8n.pt",
+    parser.add_argument("--model", type=str, default=CONFIG.model_name,
                         help="YOLO model configuration name or local PT path")
     parser.add_argument("--conf", type=float, default=CONFIG.tracker_confidence,
                         help="Detection confidence threshold")
