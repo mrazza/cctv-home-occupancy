@@ -63,6 +63,8 @@ class ObjectTracker:
         self.track_last_seen: Dict[int, int] = {}
         # Internal frame counter
         self.frame_count: int = 0
+        # Expose latest processed bounding boxes for visualization
+        self.latest_boxes = None
 
     @staticmethod
     def _create_tracker_config(track_buffer: int, snapshot_dir: str) -> str:
@@ -169,6 +171,7 @@ with_reid: false
             [CrossingEvent(event_type="ENTER"/"LEAVE", tracker_id=id, confidence=conf, snapshot_path=path)]
         """
         self.frame_count += 1
+        self.latest_boxes = None
         h, w, _ = frame.shape
         
         # Compute dead zone threshold in pixel space (based on frame height)
@@ -190,6 +193,7 @@ with_reid: false
 
         if results and len(results) > 0 and results[0].boxes is not None:
             boxes = results[0].boxes
+            self.latest_boxes = boxes
             
             # Extract box coordinates, tracker IDs, and confidences
             # boxes.id contains track identifiers if tracker is running

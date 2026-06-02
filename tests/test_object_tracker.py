@@ -447,3 +447,33 @@ def test_infinite_line_allows_out_of_bounds_crossing(temp_dir):
         assert len(events) == 1
         assert events[0].event_type == "LEAVE"
 
+
+def test_latest_boxes_tracking(temp_dir):
+    """Verifies that ObjectTracker.latest_boxes tracks YOLO results correctly."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        tracker = ObjectTracker(snapshot_dir=temp_dir)
+        
+        # 1. Initially, latest_boxes must be None
+        assert tracker.latest_boxes is None
+        
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        
+        # 2. Process frame with no boxes -> latest_boxes must remain None
+        mock_yolo.return_value.track.return_value = []
+        tracker.process_frame(frame)
+        assert tracker.latest_boxes is None
+        
+        # 3. Process frame with boxes -> latest_boxes must store the active boxes
+        boxes_f1 = MockBoxes([[40, 70, 60, 90]], [1], [0.95])
+        mock_result = MockResult(boxes=boxes_f1)
+        mock_yolo.return_value.track.return_value = [mock_result]
+        
+        tracker.process_frame(frame)
+        assert tracker.latest_boxes is not None
+        assert tracker.latest_boxes == boxes_f1
+        
+        # 4. Next frame, tracking returns no detections -> latest_boxes resets to None
+        mock_yolo.return_value.track.return_value = []
+        tracker.process_frame(frame)
+        assert tracker.latest_boxes is None
+
