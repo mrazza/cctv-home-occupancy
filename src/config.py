@@ -8,6 +8,8 @@ class CameraConfig(BaseModel):
     model_name: str = Field(default="yolov8n.pt", description="YOLO model configuration name or local PT path")
     fps_limit: int = Field(default=10, description="Target frames per second to process")
     video_buffer_size: int = Field(default=1, description="Size of the OpenCV VideoCapture buffer queue")
+    yolo_imgsz: int = Field(default=640, description="Image size (resolution) for YOLO inference")
+    yolo_device: Optional[str] = Field(default=None, description="Device to run YOLO model on (e.g. 'cpu', 'cuda', '0')")
     
     # API Server Settings
     host: str = Field(default="0.0.0.0", description="IP address to bind the API server to")
@@ -107,6 +109,8 @@ def load_config() -> CameraConfig:
         "CCTV_TRACKER_CONFIDENCE": ("tracker_confidence", float),
         "CCTV_TRACK_BUFFER": ("track_buffer", int),
         "CCTV_VIDEO_BUFFER_SIZE": ("video_buffer_size", int),
+        "CCTV_YOLO_IMGSZ": ("yolo_imgsz", int),
+        "CCTV_YOLO_DEVICE": ("yolo_device", lambda x: None if x.lower() in ("null", "none", "") else str(x)),
     }
     
     # Handle CCTV_WEBHOOK_URLS env variable

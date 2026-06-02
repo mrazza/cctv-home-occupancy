@@ -22,7 +22,9 @@ class ObjectTracker:
                  dead_zone_width: float = 0.0,
                  tripwire_strict_segment: bool = False,
                  conf: float = 0.25,
-                 track_buffer: int = 30):
+                 track_buffer: int = 30,
+                 yolo_imgsz: int = 640,
+                 yolo_device: Optional[str] = None):
         """
         Object Tracker utilizing YOLOv8/11 and ByteTrack to trace person trajectories and detect line crossing events.
         
@@ -67,6 +69,8 @@ class ObjectTracker:
         self.tripwire_strict_segment = tripwire_strict_segment
         self.conf = conf
         self.track_buffer = track_buffer
+        self.yolo_imgsz = yolo_imgsz
+        self.yolo_device = yolo_device
         os.makedirs(self.snapshot_dir, exist_ok=True)
         
         # Generate a custom tracker config with the specified track_buffer
@@ -204,7 +208,8 @@ with_reid: false
         # Run tracking. Classes=0 is 'person'.
         # persist=True ensures the tracking state is maintained.
         results = self.model.track(frame, persist=True, classes=[0], verbose=False,
-                                    conf=self.conf, tracker=self._tracker_config_path)
+                                    conf=self.conf, tracker=self._tracker_config_path,
+                                    imgsz=self.yolo_imgsz, device=self.yolo_device)
         
         events = []
         active_tracker_ids = set()

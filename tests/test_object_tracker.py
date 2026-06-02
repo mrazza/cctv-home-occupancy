@@ -543,3 +543,37 @@ def test_collinear_resolution_inside_and_outside(temp_dir):
         assert tracker.track_confirmed_sides[20] == -1
 
 
+def test_object_tracker_yolo_imgsz_and_device(temp_dir):
+    """Verifies yolo_imgsz and yolo_device config options are parsed and passed to YOLO track."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        # Test defaults
+        tracker_default = ObjectTracker(snapshot_dir=temp_dir)
+        assert tracker_default.yolo_imgsz == 640
+        assert tracker_default.yolo_device is None
+        
+        # Test custom parameters
+        tracker_custom = ObjectTracker(
+            snapshot_dir=temp_dir,
+            yolo_imgsz=1280,
+            yolo_device="cuda"
+        )
+        assert tracker_custom.yolo_imgsz == 1280
+        assert tracker_custom.yolo_device == "cuda"
+        
+        # Process a frame and assert mock_yolo.track received parameters
+        mock_yolo.return_value.track.return_value = []
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        tracker_custom.process_frame(frame)
+        
+        mock_yolo.return_value.track.assert_called_once_with(
+            frame,
+            persist=True,
+            classes=[0],
+            verbose=False,
+            conf=0.25,
+            tracker=tracker_custom._tracker_config_path,
+            imgsz=1280,
+            device="cuda"
+        )
+
+

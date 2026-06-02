@@ -315,6 +315,8 @@ def reload_config_settings(config_path: str, tracker: ObjectTracker) -> bool:
         tracker.conf = CONFIG.tracker_confidence
         tracker.tripwire_strict_segment = CONFIG.tripwire_strict_segment
         tracker.track_buffer = CONFIG.track_buffer
+        tracker.yolo_imgsz = CONFIG.yolo_imgsz
+        tracker.yolo_device = CONFIG.yolo_device
         
         # Re-create internal custom BoT-SORT YAML tracker config
         tracker._tracker_config_path = tracker._create_tracker_config(tracker.track_buffer, tracker.snapshot_dir)
@@ -342,6 +344,10 @@ def main():
                         help="OpenCV VideoCapture buffer size")
     parser.add_argument("--config", type=str, default="config.json",
                         help="Path to JSON configuration file")
+    parser.add_argument("--yolo-imgsz", type=int, default=CONFIG.yolo_imgsz,
+                        help="YOLO inference image size (default from config)")
+    parser.add_argument("--yolo-device", type=str, default=CONFIG.yolo_device,
+                        help="Device to run YOLO on (e.g. 'cpu', 'cuda', '0')")
     args = parser.parse_args()
 
     # Load initial config and set matching tracker settings
@@ -353,7 +359,9 @@ def main():
         dead_zone_width=CONFIG.tripwire_dead_zone_width,
         tripwire_strict_segment=CONFIG.tripwire_strict_segment,
         conf=args.conf,
-        track_buffer=args.track_buffer
+        track_buffer=args.track_buffer,
+        yolo_imgsz=args.yolo_imgsz,
+        yolo_device=args.yolo_device
     )
 
     is_live = args.rtsp.startswith("rtsp://") or args.rtsp.startswith("rtmp://")
