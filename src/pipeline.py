@@ -99,7 +99,7 @@ class ThreadedVideoReader:
                 self._last_read_time = time.time()
                 self._frame_count += 1
                 if self._frame_count % 3 == 0:  # Use a lower divisor so it's easily coverable in tests
-                    logger.info(f"Heartbeat: ThreadedVideoReader has successfully processed {self._frame_count} frames.")
+                    logger.debug(f"Heartbeat: ThreadedVideoReader has successfully processed {self._frame_count} frames.")
             else:
                 # If we haven't successfully read a frame for more than 10.0 seconds, trigger reconnect
                 if time.time() - self._last_read_time > 10.0:
@@ -186,7 +186,6 @@ class PipelineOrchestrator:
                     self.cooldown_counter = self.cooldown_frames
                     # Trigger YOLO tracker on this frame
                     events = self.object_tracker.process_frame(frame)
-            
             elif self.state == "ACTIVE":
                 # Run YOLO Tracker
                 events = self.object_tracker.process_frame(frame)

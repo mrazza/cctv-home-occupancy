@@ -2,10 +2,13 @@ import os
 import cv2
 import uuid
 import math
+import logging
 import numpy as np
 from datetime import datetime
 from typing import Optional, Tuple, Dict, List, Any
 from ultralytics import YOLO
+
+logger = logging.getLogger(__name__)
 
 class ObjectTracker:
     # Class-level attribute to support mocking/autospecing
@@ -142,7 +145,10 @@ class ObjectTracker:
                     if tracker_id not in self.track_histories:
                         self.track_histories[tracker_id] = []
                         # Calculate initial side of the tripwire
-                        self.track_confirmed_sides[tracker_id] = self._get_point_side(A, B, curr_point)
+                        initial_side = self._get_point_side(A, B, curr_point)
+                        self.track_confirmed_sides[tracker_id] = initial_side
+                        side_label = {1: "INSIDE (+1)", -1: "OUTSIDE (-1)", 0: "COLLINEAR (0)"}.get(initial_side, str(initial_side))
+                        logger.info(f"New tracker ID {tracker_id} created at ({cx:.1f}, {cy:.1f}), initial side: {side_label}, conf: {conf:.2f}")
                     
                     confirmed_side = self.track_confirmed_sides[tracker_id]
                     signed_dist = self._get_signed_distance(A, B, curr_point)
@@ -153,15 +159,19 @@ class ObjectTracker:
                     if confirmed_side == -1 and signed_dist > dead_zone_half_px:
                         event_type = "ENTER"
                         self.track_confirmed_sides[tracker_id] = 1
+                        logger.info(f"Tracker {tracker_id} crossed tripwire: OUTSIDE -> INSIDE (ENTER), signed_dist: {signed_dist:.1f}, dead_zone_half: {dead_zone_half_px:.1f}")
                     elif confirmed_side == 1 and signed_dist < -dead_zone_half_px:
                         event_type = "LEAVE"
                         self.track_confirmed_sides[tracker_id] = -1
+                        logger.info(f"Tracker {tracker_id} crossed tripwire: INSIDE -> OUTSIDE (LEAVE), signed_dist: {signed_dist:.1f}, dead_zone_half: {dead_zone_half_px:.1f}")
                     elif confirmed_side == 0:
                         # If initially collinear, commit to whichever side the centroid moves towards
                         if signed_dist > dead_zone_half_px:
                             self.track_confirmed_sides[tracker_id] = 1
+                            logger.info(f"Tracker {tracker_id} resolved from COLLINEAR -> INSIDE (+1), signed_dist: {signed_dist:.1f}")
                         elif signed_dist < -dead_zone_half_px:
                             self.track_confirmed_sides[tracker_id] = -1
+                            logger.info(f"Tracker {tracker_id} resolved from COLLINEAR -> OUTSIDE (-1), signed_dist: {signed_dist:.1f}")
                             
                     if event_type:
                         bbox = (int(x1), int(y1), int(x2), int(y2))
@@ -181,6 +191,9 @@ class ObjectTracker:
         # Cleanup old tracking histories that are no longer active to prevent memory leaks
         dead_ids = [tid for tid in self.track_histories if tid not in active_tracker_ids]
         for tid in dead_ids:
+            last_side = self.track_confirmed_sides.get(tid)
+            side_label = {1: "INSIDE", -1: "OUTSIDE", 0: "COLLINEAR"}.get(last_side, str(last_side))
+            logger.info(f"Tracker {tid} lost (no longer active). Last confirmed side: {side_label}. Cleaning up.")
             del self.track_histories[tid]
             if tid in self.track_confirmed_sides:
                 del self.track_confirmed_sides[tid]
