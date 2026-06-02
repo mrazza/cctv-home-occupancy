@@ -38,13 +38,15 @@ def draw_hud_sidebar(frame, tracker, is_paused, show_roi, show_tripwire, show_hi
     # 1. Overlay panel (semi-transparent dark background) - Optimized ROI crop/blend
     sub_frame = frame[10:h - 10, 10:hud_w]
     overlay = sub_frame.copy()
-    cv2.rectangle(overlay, (0, 0), (hud_w - 10, h - 20), (15, 15, 15), -1)
+    cv2.rectangle(overlay, (0, 0), (hud_w - 10, h - 20), (12, 12, 12), -1)
     
     # Blend with original sub-frame view
-    cv2.addWeighted(overlay, 0.82, sub_frame, 0.18, 0, sub_frame)
+    cv2.addWeighted(overlay, 0.88, sub_frame, 0.12, 0, sub_frame)
     
     # Draw a thin stylish cyan border around the HUD panel
     cv2.rectangle(frame, (10, 10), (hud_w, h - 10), COLOR_CYAN, 1, cv2.LINE_AA)
+    # Bezel effect - draw a thin dark line inside the border
+    cv2.rectangle(frame, (13, 13), (hud_w - 3, h - 13), (50, 50, 50), 1, cv2.LINE_AA)
     
     # Calculate scale factors based on the frame height
     scale_factor = h / 1080.0
@@ -53,15 +55,10 @@ def draw_hud_sidebar(frame, tracker, is_paused, show_roi, show_tripwire, show_hi
     font = cv2.FONT_HERSHEY_SIMPLEX
     
     if is_compact:
-        font_scale = max(0.32, min(0.42, 0.38 * (h / 500.0)))
-        header_scale = font_scale + 0.08
-        line_height = int(32 * font_scale)
-        y = int(35 * scale_factor)
-        if y < 15:
-            y = 15
-        x_offset = int(25 * (hud_w / 340.0))
-        if x_offset < 12:
-            x_offset = 12
+        font_scale = 0.36
+        line_height = 18
+        y = 35
+        x_offset = 20
     else:
         font_scale = max(0.45, min(0.65, 0.45 * scale_factor * 1.1))
         header_scale = font_scale + 0.1
@@ -95,36 +92,80 @@ def draw_hud_sidebar(frame, tracker, is_paused, show_roi, show_tripwire, show_hi
     def get_toggle_col(val):
         return COLOR_GREEN if val else COLOR_GRAY
 
+    def draw_badge(bx, by, btext, bg_color, btext_color=COLOR_WHITE):
+        (tw, th), baseline = cv2.getTextSize(btext, font, font_scale, 1)
+        cv2.rectangle(frame, (bx, by - th - 3), (bx + tw + 6, by + 3), bg_color, -1, cv2.LINE_AA)
+        cv2.rectangle(frame, (bx, by - th - 3), (bx + tw + 6, by + 3), (20, 20, 20), 1, cv2.LINE_AA)
+        cv2.putText(frame, btext, (bx + 3, by), font, font_scale, btext_color, 1, cv2.LINE_AA)
+
+    def draw_kv(label, value, value_color=COLOR_WHITE):
+        nonlocal y
+        cv2.putText(frame, label, (x_offset, y), font, font_scale, COLOR_GRAY, 1, cv2.LINE_AA)
+        (tw, th), _ = cv2.getTextSize(str(value), font, font_scale, 1)
+        cv2.putText(frame, str(value), (hud_w - 20 - tw, y), font, font_scale, value_color, 1, cv2.LINE_AA)
+        y += line_height
+
     if is_compact:
-        draw_header("CCTV TRACKER HUD", color=COLOR_CYAN)
+        # Title
+        cv2.putText(frame, "CCTV MONITOR", (x_offset, y), font, 0.42, COLOR_CYAN, 1, cv2.LINE_AA)
+        y += line_height
         
-        # System Status
-        state_str = "PAUSED" if is_paused else "PLAYING"
-        state_col = COLOR_RED if is_paused else COLOR_GREEN
-        draw_text(f"FPS: {fps:.1f} | Frame: {frame_count}")
-        draw_text(f"State: {state_str}", color=state_col)
+        # Helper for compact section header
+        def draw_section(title):
+            nonlocal y
+            cv2.line(frame, (x_offset, y - 6), (hud_w - 20, y - 6), (50, 50, 50), 1, cv2.LINE_AA)
+            cv2.putText(frame, title.upper(), (x_offset, y + 6), font, 0.36, COLOR_GOLD, 1, cv2.LINE_AA)
+            y += line_height + 2
+
+        # 1. System section
+        draw_section("System State")
+        cv2.putText(frame, "Status", (x_offset, y), font, font_scale, COLOR_GRAY, 1, cv2.LINE_AA)
+        state_str = "PAUSED" if is_paused else "ACTIVE"
+        state_bg = COLOR_RED if is_paused else COLOR_GREEN
+        draw_badge(hud_w - 75, y, state_str, state_bg, COLOR_DARK_GRAY)
+        y += line_height
         
-        # Tracking Stats & Details
+        draw_kv("FPS", f"{fps:.1f}", COLOR_WHITE)
+        draw_kv("Frame", f"{frame_count}", COLOR_WHITE)
+
+        # 2. Tracking section
+        draw_section("YOLO Tracking")
         num_tracks = len(tracker.track_histories)
-        draw_text(f"Tracks: {num_tracks}", color=COLOR_GOLD if num_tracks > 0 else COLOR_GRAY)
+        tracks_color = COLOR_GREEN if num_tracks > 0 else COLOR_GRAY
+        draw_kv("Tracks", f"{num_tracks}", tracks_color)
         
         model_base = os.path.basename(tracker.model.model_name)
-        draw_text(f"Model: {model_base}")
-        draw_text(f"YOLO Conf: {tracker.conf:.2f} | Buf: {tracker.track_buffer}")
-        
-        # Tripwire
+        if len(model_base) > 16:
+            model_base = model_base[:13] + "..."
+        draw_kv("Model", model_base, COLOR_WHITE)
+        draw_kv("Conf Thresh", f"{tracker.conf:.2f}", COLOR_WHITE)
+
+        # 3. Tripwire Section
+        draw_section("Tripwire Settings")
         dead_pct = int(tracker.dead_zone_width * 100)
-        pt_a = tracker.tripwire_line[0]
-        pt_b = tracker.tripwire_line[1]
-        draw_text(f"Dead Zone: {dead_pct}%")
-        draw_text(f"A:({pt_a[0]:.2f},{pt_a[1]:.2f}) B:({pt_b[0]:.2f},{pt_b[1]:.2f})", color=COLOR_GRAY)
+        draw_kv("Dead Zone", f"{dead_pct}%", COLOR_WHITE)
+
+        # 4. Layers section
+        draw_section("Visual Layers")
         
-        # Visual Layers
-        draw_text(f"ROI:{get_toggle_str(show_roi)} | Trip:{get_toggle_str(show_tripwire)} | Trails:{get_toggle_str(show_history)}")
-        
-        # Shortcuts
-        draw_text("P:Pause | R:Reset", color=COLOR_WHITE)
-        draw_text("L:Reload | Q:Quit", color=COLOR_WHITE)
+        def draw_toggle_badge(label, val):
+            nonlocal y
+            cv2.putText(frame, label, (x_offset, y), font, font_scale, COLOR_GRAY, 1, cv2.LINE_AA)
+            toggle_str = "SHOW" if val else "HIDE"
+            toggle_bg = COLOR_GREEN if val else COLOR_GRAY
+            draw_badge(hud_w - 60, y, toggle_str, toggle_bg, COLOR_DARK_GRAY)
+            y += line_height
+
+        draw_toggle_badge("Motion ROI", show_roi)
+        draw_toggle_badge("Tripwire Line", show_tripwire)
+        draw_toggle_badge("History Trails", show_history)
+
+        # 5. Shortcuts section
+        draw_section("Shortcuts")
+        cv2.putText(frame, "[P] Pause  [R] Reset", (x_offset, y), font, font_scale, COLOR_WHITE, 1, cv2.LINE_AA)
+        y += line_height
+        cv2.putText(frame, "[L] Reload [Q] Quit", (x_offset, y), font, font_scale, COLOR_WHITE, 1, cv2.LINE_AA)
+        y += line_height
     else:
         # Full Layout
         draw_header("CCTV OBJECT TRACKER HUD", color=COLOR_CYAN)
