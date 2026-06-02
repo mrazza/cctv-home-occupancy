@@ -2,7 +2,8 @@ import time
 import numpy as np
 from unittest.mock import MagicMock, patch
 import logging
-from src.pipeline import PipelineOrchestrator, ThreadedVideoReader
+from src.pipeline import PipelineOrchestrator
+from src.video_reader import ThreadedVideoReader
 from src.motion_detector import MotionDetector
 from src.object_tracker import ObjectTracker
 from src.types import CrossingEvent

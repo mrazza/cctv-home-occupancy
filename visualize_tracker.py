@@ -13,7 +13,7 @@ logger = logging.getLogger("visualize_tracker")
 from src.config import CONFIG, load_config
 from src.object_tracker import ObjectTracker
 from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines
-from src.pipeline import ThreadedVideoReader
+from src.video_reader import ThreadedVideoReader
 
 # Define a premium color scheme (BGR format)
 COLOR_CYAN = (255, 235, 0)
