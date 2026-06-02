@@ -6,6 +6,10 @@ from src.types import PresenceState, DatabaseEvent
 
 class DatabaseManager:
     def __init__(self, db_path: str):
+        """
+        Initializes the DatabaseManager, creating parent directories for the SQLite file if needed,
+        and triggers table initialization.
+        """
         self.db_path = db_path
         # Create parent directory if needed
         db_dir = os.path.dirname(self.db_path)
@@ -14,6 +18,10 @@ class DatabaseManager:
         self.init_db()
 
     def get_connection(self) -> sqlite3.Connection:
+        """
+        Establishes a connection to the SQLite database.
+        Enables foreign key constraints and sets sqlite3.Row row factory for column access.
+        """
         # Enable foreign keys and autocommit/concurrency tuning for SQLite
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
@@ -21,6 +29,10 @@ class DatabaseManager:
         return conn
 
     def init_db(self):
+        """
+        Initializes the database schema by creating presence_state and events_log tables.
+        Also inserts initial default state row if not already present.
+        """
         conn = self.get_connection()
         try:
             with conn:
@@ -57,6 +69,12 @@ class DatabaseManager:
             conn.close()
 
     def get_current_state(self) -> PresenceState:
+        """
+        Fetches the current household presence state from the presence_state table.
+        
+        Returns:
+            PresenceState representing current occupancy count and home/away status.
+        """
         conn = self.get_connection()
         try:
             cursor = conn.execute(
@@ -76,7 +94,20 @@ class DatabaseManager:
     def log_event(self, event_type: str, tracker_id: Optional[int] = None, 
                   confidence: Optional[float] = None, snapshot_path: Optional[str] = None,
                   session_id: Optional[str] = None) -> int:
-        """Logs entry/leave event and updates state atomically."""
+        """
+        Logs an ENTER or LEAVE event to the database and atomically updates occupancy and presence status.
+        Handles safe type casting of numpy values (int, float) before writing to the database.
+
+        Args:
+            event_type: The type of event ("ENTER", "LEAVE").
+            tracker_id: Optional ID of the associated object tracker track.
+            confidence: Optional confidence of the detection.
+            snapshot_path: Optional file path to the saved crop snapshot.
+            session_id: Optional UUID identifying the active tracker session.
+
+        Returns:
+            The row ID of the inserted event log record.
+        """
         # Convert any numpy integers/floats or other convertible types to standard python types
         if tracker_id is not None:
             tracker_id = int(tracker_id)
@@ -145,6 +176,15 @@ class DatabaseManager:
             conn.close()
 
     def get_recent_events(self, limit: int = 10) -> list[DatabaseEvent]:
+        """
+        Retrieves a list of recent database event log entries, sorted newest first.
+
+        Args:
+            limit: The maximum number of entries to retrieve.
+
+        Returns:
+            List of DatabaseEvent objects.
+        """
         conn = self.get_connection()
         try:
             cursor = conn.execute("""

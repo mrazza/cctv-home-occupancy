@@ -27,6 +27,11 @@ COLOR_DARK_GRAY = (30, 30, 30)
 
 
 def draw_hud_sidebar(frame, tracker, is_paused, show_roi, show_tripwire, show_history, fps, frame_count, source_name):
+    """
+    Draws a stylish, semi-transparent HUD sidebar panel on the left side of the frame.
+    Displays real-time performance statistics, active tracker parameters, tripwire settings,
+    visual layer toggle indicators, and list of keyboard shortcuts.
+    """
     h, w, _ = frame.shape
     hud_w = max(240, min(450, int(w * 0.18)))
     
@@ -167,6 +172,10 @@ def draw_hud_sidebar(frame, tracker, is_paused, show_roi, show_tripwire, show_hi
 
 
 def draw_history_trails(frame, tracker):
+    """
+    Draws fading centroid history trails for all currently tracked objects.
+    Uses BGR color blending to create a sleek purple-to-pink gradient effect.
+    """
     for tid in list(tracker.track_histories.keys()):
         points = tracker.track_histories.get(tid, [])
         if len(points) < 2:
@@ -190,6 +199,10 @@ def draw_history_trails(frame, tracker):
 
 
 def draw_tracking_boxes(frame, tracker):
+    """
+    Draws bounding boxes, centroids, track IDs, and confidence scores for active detections.
+    Also draws a filled background tag header above the bounding boxes.
+    """
     if not hasattr(tracker, "latest_boxes") or tracker.latest_boxes is None:
         return
     
@@ -233,6 +246,10 @@ def draw_tracking_boxes(frame, tracker):
 
 
 def draw_tripwires(frame, tracker):
+    """
+    Draws the primary tripwire segment, its directional inside entry arrow,
+    and a semi-transparent yellow dead zone area bounding box.
+    """
     h, w, _ = frame.shape
     tx1, ty1 = int(tracker.tripwire_line[0][0] * w), int(tracker.tripwire_line[0][1] * h)
     tx2, ty2 = int(tracker.tripwire_line[1][0] * w), int(tracker.tripwire_line[1][1] * h)
@@ -281,6 +298,9 @@ def draw_tripwires(frame, tracker):
 
 
 def draw_motion_roi(frame):
+    """
+    Draws the motion detection Region of Interest (ROI) boundary polygon.
+    """
     if CONFIG.motion_roi is None:
         return
     
@@ -328,6 +348,10 @@ def reload_config_settings(config_path: str, tracker: ObjectTracker) -> bool:
 
 
 def main():
+    """
+    CLI Entry point. Initializes ObjectTracker, connects to RTSP stream or offline file,
+    runs the YOLO processing, renders HUD and visualization overlays, and processes keyboard shortcuts.
+    """
     from src.logger import setup_logging
     setup_logging(log_level="INFO")
 

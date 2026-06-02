@@ -13,6 +13,13 @@ from src.logger import setup_logging
 logger = logging.getLogger(__name__)
 
 def run_pipeline(orchestrator, rtsp_url):
+    """
+    Helper target function to run the continuous stream pipeline inside a background thread.
+
+    Args:
+        orchestrator: PipelineOrchestrator instance.
+        rtsp_url: Target camera stream URL.
+    """
     logger.info(f"Starting CCTV Monitoring Pipeline thread on: {rtsp_url}")
     try:
         orchestrator.run_on_stream(rtsp_url)
@@ -20,6 +27,11 @@ def run_pipeline(orchestrator, rtsp_url):
         logger.info("Stopping pipeline thread due to KeyboardInterrupt...")
 
 def main():
+    """
+    Daemon entry point. Parses command-line arguments to override defaults,
+    initializes the SQLite database, and runs the uvicorn FastAPI server and/or
+    the background stream processing pipeline thread.
+    """
     # Setup central logging first
     setup_logging(log_level=CONFIG.log_level, log_file=CONFIG.log_file)
     logger.info("CCTV Monitoring Daemon starting...")

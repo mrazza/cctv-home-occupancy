@@ -73,6 +73,20 @@ class CameraConfig(BaseModel):
     webhook_timeout: int = Field(default=5, description="Timeout in seconds for the webhook requests")
 
 def load_config() -> CameraConfig:
+    """
+    Loads the system configuration.
+    
+    Precedence:
+    1. Base defaults defined in CameraConfig pydantic model schema.
+    2. JSON configuration file (defaults to config.json, overridden by CCTV_CONFIG_PATH env).
+    3. Individual environment variables (e.g. CCTV_RTSP_URL, CCTV_MODEL_NAME).
+    
+    Handles custom parsing of structured/list environment variables like 
+    CCTV_WEBHOOK_URLS, CCTV_MOTION_ROI, and CCTV_TRIPWIRE_LINE.
+
+    Returns:
+        CameraConfig pydantic model.
+    """
     config_dict = {}
     
     # 1. Try loading from config.json if it exists

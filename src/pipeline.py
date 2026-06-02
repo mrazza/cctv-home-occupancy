@@ -46,10 +46,12 @@ class OrchestratorRegistry:
 
     @classmethod
     def set_instance(cls, instance: 'PipelineOrchestrator'):
+        """Registers the active pipeline orchestrator instance globally."""
         cls._instance = instance
 
     @classmethod
     def get_instance(cls) -> Optional['PipelineOrchestrator']:
+        """Retrieves the globally registered pipeline orchestrator instance."""
         return cls._instance
 
 
@@ -72,6 +74,12 @@ class ThreadedVideoReader:
         self._frame_count = 0
 
     def start(self):
+        """
+        Starts the background frame capture update loop thread.
+
+        Returns:
+            Self instance (ThreadedVideoReader).
+        """
         if self.running:
             return self
         logger.info(f"Starting ThreadedVideoReader on source: {self.src}")
@@ -81,6 +89,10 @@ class ThreadedVideoReader:
         return self
 
     def _update(self):
+        """
+        Internal target method running in a background thread.
+        Continuously reads frames from VideoCapture and handles reconnects on failures/timeouts.
+        """
         logger.info("ThreadedVideoReader update loop started.")
         while self.running:
             if not self.cap.isOpened():
@@ -122,12 +134,23 @@ class ThreadedVideoReader:
                     time.sleep(0.001)
 
     def read(self) -> Tuple[bool, Optional[cv2.Mat]]:
+        """
+        Returns the latest captured frame and its status.
+        Calling this method marks the frame as consumed, so subsequent reads
+        will return False until a new frame has been read.
+
+        Returns:
+            Tuple (is_new_frame, frame_data).
+        """
         with self.lock:
             ret = self.ret
             self.ret = False  # Mark as consumed so subsequent reads return False until a new frame is retrieved
             return ret, self.frame
 
     def stop(self):
+        """
+        Stops the background reader update thread and releases the OpenCV VideoCapture resource.
+        """
         logger.info("Stopping ThreadedVideoReader...")
         self.running = False
         if self.thread:
@@ -146,6 +169,13 @@ class PipelineOrchestrator:
                  fps_limit: int = 10):
         """
         Orchestrates the "Fast & Slow" pipeline switching between low-CPU motion detection and high-accuracy YOLO.
+
+        Args:
+            db_manager: DatabaseManager instance for state storage/event logging.
+            motion_detector: Custom MotionDetector. If None, initialized using CONFIG motion settings.
+            object_tracker: Custom ObjectTracker. If None, initialized using CONFIG tracker settings.
+            cooldown_frames: Idle frames before ACTIVE state returns to IDLE state.
+            fps_limit: Rate regulation for the processing loop (target frames per second).
         """
         self.db = db_manager
         self.motion_detector = motion_detector or MotionDetector(
@@ -357,5 +387,8 @@ class PipelineOrchestrator:
             logger.exception(f"Unexpected error dispatching webhook {url}: {exc}")
 
     def stop(self):
+        """
+        Signals the continuous processing loop run_on_stream to stop running.
+        """
         logger.info("Orchestrator stop requested.")
         self.running = False

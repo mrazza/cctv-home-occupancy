@@ -11,6 +11,16 @@ from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines
 def normalize_coordinates(A: Tuple[int, int], B: Tuple[int, int], width: int, height: int, sort_coords: bool = False) -> List[Tuple[float, float]]:
     """
     Converts raw pixel coordinates to normalized floats between 0.0 and 1.0.
+
+    Args:
+        A: Start point (x, y) in pixels.
+        B: End point (x, y) in pixels.
+        width: Frame width in pixels.
+        height: Frame height in pixels.
+        sort_coords: If True, sorts the coordinates so x1 <= x2 and y1 <= y2.
+
+    Returns:
+        List containing normalized [(x1, y1), (x2, y2)] coordinates.
     """
     if width <= 0 or height <= 0:
         raise ValueError("Width and height must be positive values")
@@ -29,6 +39,14 @@ def normalize_coordinates(A: Tuple[int, int], B: Tuple[int, int], width: int, he
 def normalize_polygon(pts: List[Tuple[int, int]], width: int, height: int) -> List[Tuple[float, float]]:
     """
     Converts raw pixel coordinates of a polygon to normalized floats between 0.0 and 1.0.
+
+    Args:
+        pts: List of polygon vertices (x, y) in pixels.
+        width: Frame width in pixels.
+        height: Frame height in pixels.
+
+    Returns:
+        List of normalized [(x, y), ...] coordinates.
     """
     if width <= 0 or height <= 0:
         raise ValueError("Width and height must be positive values")
@@ -37,6 +55,14 @@ def normalize_polygon(pts: List[Tuple[int, int]], width: int, height: int) -> Li
 def update_config_file(config_json_path: str, coordinates: List[Tuple[float, float]], key: str = "tripwire_line") -> bool:
     """
     Safely saves the coordinates to config.json under the specified key.
+
+    Args:
+        config_json_path: Path to the JSON configuration file to update.
+        coordinates: Normalized coordinates to write.
+        key: The key in the configuration JSON to set (e.g. "tripwire_line", "motion_roi").
+
+    Returns:
+        True if the write succeeded, False otherwise.
     """
     try:
         config_data = {}
@@ -60,6 +86,14 @@ def update_config_file(config_json_path: str, coordinates: List[Tuple[float, flo
 
 class CalibrationApp:
     def __init__(self, stream_url: str, config_json_path: str = "config.json", mode: str = "tripwire"):
+        """
+        Initializes the CalibrationApp.
+
+        Args:
+            stream_url: Camera stream RTSP/video source URL.
+            config_json_path: Path to JSON configuration file to modify.
+            mode: "tripwire" or "roi" to determine what coordinates are being calibrated.
+        """
         self.stream_url = stream_url
         self.config_json_path = config_json_path
         self.mode = mode
@@ -75,6 +109,10 @@ class CalibrationApp:
         self.is_drawing = False
 
     def mouse_callback(self, event, x, y, flags, param):
+        """
+        OpenCV mouse event callback. Tracks clicks and mouse movement to record
+        line segment points (tripwire) or vertices (ROI polygon).
+        """
         if self.mode == "roi":
             if event == cv2.EVENT_LBUTTONDOWN:
                 if not self.polygon_closed:
@@ -96,6 +134,10 @@ class CalibrationApp:
                 self.mouse_pos = (x, y)
 
     def draw_overlays(self, frame_draw) -> np.ndarray:
+        """
+        Draws interactive overlays, instruction HUD text, current lines/polygons,
+        dead zones, and vector directions onto a copy of the camera frame.
+        """
         h, w, _ = frame_draw.shape
         
         # Display instructions
@@ -200,6 +242,10 @@ class CalibrationApp:
         return frame_draw
 
     def run(self):
+        """
+        Starts the OpenCV UI window, listens for mouse clicks, and waits for user
+        keyboard shortcuts (e.g. [S] to save, [R] to reset, [Q] to quit).
+        """
         window_name = "ROI Calibration" if self.mode == "roi" else "Tripwire Calibration"
         print(f"[*] Opening stream for {self.mode} calibration...")
         if not self.cap.isOpened():

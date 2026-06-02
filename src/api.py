@@ -120,7 +120,18 @@ def get_current_frame(
     width: Optional[int] = Query(default=None, ge=1, description="Optional target width for resizing"),
     height: Optional[int] = Query(default=None, ge=1, description="Optional target height for resizing")
 ):
-    """Retrieves the current real-time frame from the video stream."""
+    """
+    Retrieves the current real-time frame from the video stream.
+
+    Args:
+        draw_tripwire: If True, overlay the tripwire line, start/end points, direction vector, and dead zone.
+        draw_roi: If True, overlay the motion detection Region of Interest (ROI) boundary.
+        width: Optional pixel width for resizing the response image.
+        height: Optional pixel height for resizing the response image.
+
+    Returns:
+        FastAPI Response object containing JPEG-encoded image.
+    """
     # 1. Fetch from shared frame registry
     frame = FrameRegistry.get_frame()
     

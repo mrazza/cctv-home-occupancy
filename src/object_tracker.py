@@ -35,8 +35,11 @@ class ObjectTracker:
             dead_zone_width: Width of the hysteresis dead zone around the tripwire, as a fraction of frame height.
                 When set to 0.0, any signed-distance change across the line triggers an event immediately
                 (note: this uses distance-based logic, not segment intersection).
+            tripwire_strict_segment: If True, restricts crossings to projection falling strictly within the tripwire segment boundaries.
             conf: Minimum detection confidence threshold for YOLO person detections (0.0 to 1.0).
             track_buffer: Number of frames to keep lost tracks alive before reassigning a new tracker ID.
+            yolo_imgsz: Image size (resolution) for YOLO model inference.
+            yolo_device: Target device to run YOLO model on (e.g. 'cpu', 'cuda', '0').
         """
         # Disable Ultralytics telemetry and sync settings to prevent periodic network lag
         try:
@@ -146,6 +149,7 @@ with_reid: false
     def _is_point_in_segment_bounds(self, A: Tuple[float, float], B: Tuple[float, float], P: Tuple[float, float]) -> bool:
         """
         Checks if the projection of point P onto the line defined by AB falls within the line segment AB.
+        Allows a small margin (-0.1 to 1.1) to account for bounding box width at the segment edges.
         """
         # Calculate dot product of AB and AP
         dot_product = (P[0] - A[0]) * (B[0] - A[0]) + (P[1] - A[1]) * (B[1] - A[1])
@@ -164,7 +168,18 @@ with_reid: false
         return -0.1 <= t <= 1.1
 
     def save_crop(self, frame: np.ndarray, bbox: Tuple[int, int, int, int], tracker_id: int, event_type: str) -> Optional[str]:
-        """Saves a high-resolution crop of the person bounding box for future face recognition."""
+        """
+        Saves a high-resolution crop of the person bounding box for future face recognition.
+
+        Args:
+            frame: Raw BGR image frame.
+            bbox: Bounding box coordinates (x1, y1, x2, y2).
+            tracker_id: ByteTrack ID of the person.
+            event_type: "ENTER" or "LEAVE" representing the tripwire crossing event type.
+
+        Returns:
+            The file path to the saved crop image, or None if crop failed.
+        """
         try:
             h, w, _ = frame.shape
             x1, y1, x2, y2 = bbox

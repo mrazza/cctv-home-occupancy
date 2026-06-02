@@ -4,7 +4,14 @@ import sys
 from typing import Optional
 
 def setup_logging(log_level: str = "INFO", log_file: Optional[str] = "logs/cctv.log"):
-    """Configures standard logging to both stdout and optionally a file."""
+    """
+    Configures standard logging to stdout and optionally to a log file.
+    Also silences verbose logging for third-party libraries (urllib3, ultralytics, httpx).
+
+    Args:
+        log_level: String representation of the logging level (e.g., "INFO", "DEBUG").
+        log_file: Optional file path to write log output to. Set to None/null to disable file logging.
+    """
     # Convert string log level to numeric
     numeric_level = getattr(logging, log_level.upper(), None)
     if not isinstance(numeric_level, int):

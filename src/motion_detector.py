@@ -22,14 +22,22 @@ class MotionDetector:
         self._roi_area: Optional[int] = None
 
     def reset(self):
-        """Resets the accumulated background model."""
+        """
+        Resets the accumulated background model and clears ROI binary mask/area caches.
+        """
         self.background_accumulator = None
         self._mask_cache = None
         self._roi_area = None
 
     def detect(self, frame: np.ndarray) -> bool:
         """
-        Processes a frame and returns True if motion is detected, updating the background.
+        Processes a frame, updates the background model, and checks for significant motion.
+
+        Args:
+            frame: Raw BGR image frame (numpy array).
+
+        Returns:
+            True if the calculated motion pixel fraction meets or exceeds the threshold, False otherwise.
         """
         h, w, _ = frame.shape
         
