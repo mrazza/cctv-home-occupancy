@@ -8,6 +8,7 @@ from src.database import DatabaseManager
 from src.pipeline import PipelineOrchestrator, ThreadedVideoReader, FrameRegistry
 from src.motion_detector import MotionDetector
 from src.object_tracker import ObjectTracker
+from src.types import CrossingEvent, PresenceState
 
 def test_pipeline_states_idle_to_active(db_manager):
     """Verifies that the orchestrator switches states correctly when motion is detected."""
@@ -100,29 +101,29 @@ def test_pipeline_logs_events(db_manager):
     
     # Set mock_ot to return an ENTER event
     mock_md.detect.return_value = True
-    mock_ot.process_frame.return_value = [{
-        "event_type": "ENTER",
-        "tracker_id": 9,
-        "confidence": 0.88,
-        "snapshot_path": "/fake/path.jpg"
-    }]
+    mock_ot.process_frame.return_value = [CrossingEvent(
+        event_type="ENTER",
+        tracker_id=9,
+        confidence=0.88,
+        snapshot_path="/fake/path.jpg"
+    )]
     
     frame = np.zeros((100, 100, 3), dtype=np.uint8)
     events = orchestrator.process_single_frame(frame)
     
     assert len(events) == 1
-    assert events[0]["event_type"] == "ENTER"
+    assert events[0].event_type == "ENTER"
     
     # Check DB
     state = db_manager.get_current_state()
-    assert state["is_someone_home"] is True
-    assert state["current_occupancy"] == 1
+    assert state.is_someone_home is True
+    assert state.current_occupancy == 1
     
     recent_events = db_manager.get_recent_events(limit=1)
-    assert recent_events[0]["event_type"] == "ENTER"
-    assert recent_events[0]["tracker_id"] == 9
-    assert recent_events[0]["confidence"] == 0.88
-    assert recent_events[0]["snapshot_path"] == "/fake/path.jpg"
+    assert recent_events[0].event_type == "ENTER"
+    assert recent_events[0].tracker_id == 9
+    assert recent_events[0].confidence == 0.88
+    assert recent_events[0].snapshot_path == "/fake/path.jpg"
 
 def test_pipeline_process_frame_exception(db_manager):
     """Verifies process_single_frame handles exceptions gracefully."""
@@ -415,12 +416,12 @@ def test_pipeline_webhook_success(db_manager, monkeypatch):
     mock_ot = MagicMock(spec=ObjectTracker)
     mock_ot.session_id = "test-session-123"
     mock_ot.track_histories = {}
-    mock_ot.process_frame.return_value = [{
-        "event_type": "ENTER",
-        "tracker_id": 1,
-        "confidence": 0.85,
-        "snapshot_path": "snapshots/test_snapshot.jpg"
-    }]
+    mock_ot.process_frame.return_value = [CrossingEvent(
+        event_type="ENTER",
+        tracker_id=1,
+        confidence=0.85,
+        snapshot_path="snapshots/test_snapshot.jpg"
+    )]
     
     # Inject CONFIG overrides using monkeypatch
     monkeypatch.setattr("src.pipeline.CONFIG.webhook_urls", ["http://webhook1.test", "http://webhook2.test"])
@@ -479,12 +480,12 @@ def test_pipeline_webhook_failure(db_manager, monkeypatch, caplog):
     mock_ot = MagicMock(spec=ObjectTracker)
     mock_ot.session_id = "test-session-123"
     mock_ot.track_histories = {}
-    mock_ot.process_frame.return_value = [{
-        "event_type": "LEAVE",
-        "tracker_id": 2,
-        "confidence": 0.90,
-        "snapshot_path": "snapshots/test_snapshot_2.jpg"
-    }]
+    mock_ot.process_frame.return_value = [CrossingEvent(
+        event_type="LEAVE",
+        tracker_id=2,
+        confidence=0.90,
+        snapshot_path="snapshots/test_snapshot_2.jpg"
+    )]
     
     monkeypatch.setattr("src.pipeline.CONFIG.webhook_urls", ["http://webhook-fail-status.test", "http://webhook-fail-network.test", "http://webhook-fail-unexpected.test"])
     
@@ -524,12 +525,12 @@ def test_pipeline_webhook_db_failure(db_manager, monkeypatch):
     mock_ot = MagicMock(spec=ObjectTracker)
     mock_ot.session_id = "test-session-123"
     mock_ot.track_histories = {}
-    mock_ot.process_frame.return_value = [{
-        "event_type": "ENTER",
-        "tracker_id": 1,
-        "confidence": 0.85,
-        "snapshot_path": "snapshots/test_snapshot.jpg"
-    }]
+    mock_ot.process_frame.return_value = [CrossingEvent(
+        event_type="ENTER",
+        tracker_id=1,
+        confidence=0.85,
+        snapshot_path="snapshots/test_snapshot.jpg"
+    )]
     
     monkeypatch.setattr("src.pipeline.CONFIG.webhook_urls", ["http://webhook1.test"])
     

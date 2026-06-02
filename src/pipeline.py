@@ -3,6 +3,7 @@ import time
 import threading
 import logging
 from typing import Optional, List, Dict, Any, Tuple
+from src.types import CrossingEvent
 from src.config import CONFIG
 from src.motion_detector import MotionDetector
 from src.object_tracker import ObjectTracker
@@ -168,7 +169,7 @@ class PipelineOrchestrator:
             self.active_until = time.time() + duration
             logger.info(f"On-demand event-driven window triggered/extended until epoch {self.active_until} (for {duration}s)")
 
-    def process_single_frame(self, frame: cv2.Mat) -> List[Dict[str, Any]]:
+    def process_single_frame(self, frame: cv2.Mat) -> List[CrossingEvent]:
         """
         Processes a single frame through the pipeline and updates the database state accordingly.
         Returns crossing events captured in this frame.
@@ -208,12 +209,12 @@ class PipelineOrchestrator:
                         
             # Log detected events to database
             for event in events:
-                logger.info(f"Tripwire crossing event detected: {event['event_type']} (Tracker ID: {event['tracker_id']}, Confidence: {event['confidence']:.2f})")
+                logger.info(f"Tripwire crossing event detected: {event.event_type} (Tracker ID: {event.tracker_id}, Confidence: {event.confidence:.2f})")
                 event_id = self.db.log_event(
-                    event_type=event["event_type"],
-                    tracker_id=event["tracker_id"],
-                    confidence=event["confidence"],
-                    snapshot_path=event["snapshot_path"],
+                    event_type=event.event_type,
+                    tracker_id=event.tracker_id,
+                    confidence=event.confidence,
+                    snapshot_path=event.snapshot_path,
                     session_id=self.object_tracker.session_id
                 )
                 logger.info(f"Successfully logged crossing event to DB (Event ID: {event_id})")
@@ -224,22 +225,22 @@ class PipelineOrchestrator:
                         state = self.db.get_current_state()
                         payload = {
                             "event_id": event_id,
-                            "event_type": event["event_type"],
-                            "tracker_id": event["tracker_id"],
-                            "confidence": event["confidence"],
-                            "snapshot_path": event["snapshot_path"],
-                            "is_someone_home": state["is_someone_home"],
-                            "current_occupancy": state["current_occupancy"],
-                            "timestamp": state["last_updated"]
+                            "event_type": event.event_type,
+                            "tracker_id": event.tracker_id,
+                            "confidence": event.confidence,
+                            "snapshot_path": event.snapshot_path,
+                            "is_someone_home": state.is_someone_home,
+                            "current_occupancy": state.current_occupancy,
+                            "timestamp": state.last_updated
                         }
                     except Exception as db_err:
                         logger.error(f"Failed to fetch current state for webhook payload: {db_err}")
                         payload = {
                             "event_id": event_id,
-                            "event_type": event["event_type"],
-                            "tracker_id": event["tracker_id"],
-                            "confidence": event["confidence"],
-                            "snapshot_path": event["snapshot_path"],
+                            "event_type": event.event_type,
+                            "tracker_id": event.tracker_id,
+                            "confidence": event.confidence,
+                            "snapshot_path": event.snapshot_path,
                             "is_someone_home": None,
                             "current_occupancy": None,
                             "timestamp": None

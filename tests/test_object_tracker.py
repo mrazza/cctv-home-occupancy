@@ -105,11 +105,11 @@ def test_process_frame_crossing_events(temp_dir):
         mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f2)]
         events_f2 = tracker.process_frame(frame)
         assert len(events_f2) == 1
-        assert events_f2[0]["event_type"] == "LEAVE"
-        assert events_f2[0]["tracker_id"] == 1
-        assert events_f2[0]["confidence"] == 0.96
-        assert events_f2[0]["snapshot_path"] is not None
-        assert os.path.exists(events_f2[0]["snapshot_path"])
+        assert events_f2[0].event_type == "LEAVE"
+        assert events_f2[0].tracker_id == 1
+        assert events_f2[0].confidence == 0.96
+        assert events_f2[0].snapshot_path is not None
+        assert os.path.exists(events_f2[0].snapshot_path)
 
         # Frame 3: Track 1 is still active but hasn't crossed again
         boxes_f3 = MockBoxes([[40, 5, 60, 25]], [1], [0.97])
@@ -173,7 +173,7 @@ def test_object_tracker_enter_crossing_and_history_pop(temp_dir):
         mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f2)]
         events_f2 = tracker.process_frame(frame)
         assert len(events_f2) == 1
-        assert events_f2[0]["event_type"] == "ENTER"
+        assert events_f2[0].event_type == "ENTER"
         
         # Now let's push many more frames to trigger popping the history when len > 10
         for i in range(15):
@@ -247,7 +247,7 @@ def test_tripwire_jitter_does_not_produce_spurious_events(temp_dir):
         
         # Assert total events across all 5 frames is exactly 1 (only the first ENTER)
         assert len(all_events) == 1
-        assert all_events[0]["event_type"] == "ENTER"
+        assert all_events[0].event_type == "ENTER"
 
 
 def test_dead_zone_zero_width_equivalent_to_old_behavior(temp_dir):
@@ -272,14 +272,14 @@ def test_dead_zone_zero_width_equivalent_to_old_behavior(temp_dir):
         mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f2)]
         events_f2 = tracker.process_frame(frame)
         assert len(events_f2) == 1
-        assert events_f2[0]["event_type"] == "ENTER"
+        assert events_f2[0].event_type == "ENTER"
         
         # Frame 3: crosses back outside/above (centroid y = 20) -> LEAVE
         boxes_f3 = MockBoxes([[40, 10, 60, 30]], [1], [0.97])
         mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f3)]
         events_f3 = tracker.process_frame(frame)
         assert len(events_f3) == 1
-        assert events_f3[0]["event_type"] == "LEAVE"
+        assert events_f3[0].event_type == "LEAVE"
 
 
 def test_genuine_crossing_with_dead_zone(temp_dir):
@@ -308,7 +308,7 @@ def test_genuine_crossing_with_dead_zone(temp_dir):
         mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f3)]
         events = tracker.process_frame(frame)
         assert len(events) == 1
-        assert events[0]["event_type"] == "ENTER"
+        assert events[0].event_type == "ENTER"
 
 
 def test_signed_distance_method():

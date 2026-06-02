@@ -1,6 +1,7 @@
 import os
 import cv2
 import numpy as np
+from dataclasses import asdict
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -62,9 +63,9 @@ def get_status():
         current_session_id = orchestrator.object_tracker.session_id if orchestrator is not None else None
         
         return StatusResponse(
-            is_someone_home=state["is_someone_home"],
-            current_occupancy=state["current_occupancy"],
-            last_updated=state["last_updated"] or "",
+            is_someone_home=state.is_someone_home,
+            current_occupancy=state.current_occupancy,
+            last_updated=state.last_updated or "",
             last_processed_frame=FrameRegistry.get_last_timestamp_iso(),
             system_state=system_state,
             current_session_id=current_session_id
@@ -78,7 +79,7 @@ def get_events(limit: int = Query(default=10, ge=1, le=100)):
     """Retrieves the list of recent presence transitions."""
     try:
         events = db_manager.get_recent_events(limit=limit)
-        return [EventLogItem(**e) for e in events]
+        return [EventLogItem(**asdict(e)) for e in events]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 

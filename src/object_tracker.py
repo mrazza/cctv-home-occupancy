@@ -6,6 +6,7 @@ import logging
 import numpy as np
 from datetime import datetime
 from typing import Optional, Tuple, Dict, List, Any
+from src.types import CrossingEvent
 from ultralytics import YOLO
 
 logger = logging.getLogger(__name__)
@@ -132,13 +133,13 @@ with_reid: false
         except Exception:
             return None
 
-    def process_frame(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+    def process_frame(self, frame: np.ndarray) -> List[CrossingEvent]:
         """
         Runs object tracking on the frame and checks for tripwire crossings.
         
         Returns:
             List of detected crossing events:
-            [{"event_type": "ENTER"/"LEAVE", "tracker_id": id, "confidence": conf, "snapshot_path": path}]
+            [CrossingEvent(event_type="ENTER"/"LEAVE", tracker_id=id, confidence=conf, snapshot_path=path)]
         """
         h, w, _ = frame.shape
         
@@ -214,12 +215,12 @@ with_reid: false
                     if event_type:
                         bbox = (int(x1), int(y1), int(x2), int(y2))
                         snapshot_path = self.save_crop(frame, bbox, tracker_id, event_type)
-                        events.append({
-                            "event_type": event_type,
-                            "tracker_id": int(tracker_id),
-                            "confidence": float(conf),
-                            "snapshot_path": snapshot_path
-                        })
+                        events.append(CrossingEvent(
+                            event_type=event_type,
+                            tracker_id=int(tracker_id),
+                            confidence=float(conf),
+                            snapshot_path=snapshot_path
+                        ))
                                 
                     # Append current point to history and limit size to last 10 points
                     self.track_histories[tracker_id].append(curr_point)

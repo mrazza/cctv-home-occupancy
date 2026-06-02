@@ -2,6 +2,7 @@ import os
 import sqlite3
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any
+from src.types import PresenceState, DatabaseEvent
 
 class DatabaseManager:
     def __init__(self, db_path: str):
@@ -55,7 +56,7 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def get_current_state(self) -> Dict[str, Any]:
+    def get_current_state(self) -> PresenceState:
         conn = self.get_connection()
         try:
             cursor = conn.execute(
@@ -63,12 +64,12 @@ class DatabaseManager:
             )
             row = cursor.fetchone()
             if row:
-                return {
-                    "is_someone_home": bool(row["is_someone_home"]),
-                    "current_occupancy": row["current_occupancy"],
-                    "last_updated": row["last_updated"]
-                }
-            return {"is_someone_home": False, "current_occupancy": 0, "last_updated": ""}
+                return PresenceState(
+                    is_someone_home=bool(row["is_someone_home"]),
+                    current_occupancy=row["current_occupancy"],
+                    last_updated=row["last_updated"]
+                )
+            return PresenceState(is_someone_home=False, current_occupancy=0, last_updated="")
         finally:
             conn.close()
 
@@ -152,7 +153,7 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def get_recent_events(self, limit: int = 10) -> list[Dict[str, Any]]:
+    def get_recent_events(self, limit: int = 10) -> list[DatabaseEvent]:
         conn = self.get_connection()
         try:
             cursor = conn.execute("""
@@ -162,6 +163,17 @@ class DatabaseManager:
                 LIMIT ?
             """, (limit,))
             rows = cursor.fetchall()
-            return [dict(r) for r in rows]
+            return [
+                DatabaseEvent(
+                    id=row["id"],
+                    event_type=row["event_type"],
+                    tracker_id=row["tracker_id"],
+                    confidence=row["confidence"],
+                    timestamp=row["timestamp"],
+                    snapshot_path=row["snapshot_path"],
+                    session_id=row["session_id"]
+                )
+                for row in rows
+            ]
         finally:
             conn.close()
