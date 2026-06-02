@@ -563,4 +563,38 @@ def test_pipeline_webhook_db_failure(db_manager, monkeypatch):
     assert payload["timestamp"] is None
 
 
+def test_threaded_video_reader_timeout_reconnect():
+    """Deterministic test for ThreadedVideoReader reconnection upon a read timeout (>10s)."""
+    with patch('src.pipeline.cv2.VideoCapture') as mock_vc_class:
+        mock_cap = MagicMock()
+        mock_vc_class.return_value = mock_cap
+        mock_cap.isOpened.return_value = True
+        
+        # Reader is created
+        reader = ThreadedVideoReader("rtsp://test-url")
+        reader.running = True
+        
+        # We want to exit the loop after the first iteration
+        iteration = [0]
+        def mock_read():
+            iteration[0] += 1
+            if iteration[0] > 1:
+                reader.running = False
+            return False, None
+        mock_cap.read.side_effect = mock_read
+        
+        # Manually backdate the last read time to 20 seconds ago to trigger timeout
+        reader._last_read_time = time.time() - 20.0
+        
+        # Run the update loop synchronously, patching sleep to avoid actual blocking
+        with patch('time.sleep') as mock_sleep:
+            reader._update()
+            
+        # Assert reconnect was executed
+        assert mock_cap.release.called is True
+        # Initial call + reconnect call
+        assert mock_vc_class.call_count >= 2
+
+
+
 

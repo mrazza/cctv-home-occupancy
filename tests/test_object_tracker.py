@@ -477,3 +477,70 @@ def test_latest_boxes_tracking(temp_dir):
         tracker.process_frame(frame)
         assert tracker.latest_boxes is None
 
+
+def test_object_tracker_get_signed_distance_zero_length():
+    """Verifies that _get_signed_distance returns 0.0 when the tripwire segment has zero length."""
+    tracker = ObjectTracker()
+    A = (1.0, 1.0)
+    B = (1.0, 1.0)
+    P = (2.0, 2.0)
+    assert tracker._get_signed_distance(A, B, P) == 0.0
+
+
+def test_object_tracker_is_point_in_segment_bounds_zero_length():
+    """Verifies that _is_point_in_segment_bounds returns False when the segment has zero length."""
+    tracker = ObjectTracker()
+    A = (1.0, 1.0)
+    B = (1.0, 1.0)
+    P = (2.0, 2.0)
+    assert tracker._is_point_in_segment_bounds(A, B, P) is False
+
+
+def test_collinear_resolution_inside_and_outside(temp_dir):
+    """Verifies that a collinear track is correctly resolved to either inside or outside side."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        # Tripwire at y = 0.5 horizontal (pixel y=50 on 100 height)
+        # Set dead_zone_width to 0.1 (10 pixels total, ±5 px)
+        tracker = ObjectTracker(
+            tripwire_line=[(0.0, 0.5), (1.0, 0.5)],
+            snapshot_dir=temp_dir,
+            dead_zone_width=0.1
+        )
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+
+        # 1. SCENARIO A: Resolving collinear to INSIDE (+1)
+        # Frame 1: Person starts exactly collinear at y=50
+        # Centroid y is 50.
+        boxes_a1 = MockBoxes([[40, 40, 60, 60]], [10], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_a1)]
+        tracker.process_frame(frame)
+        
+        # Verify initial side is collinear (0)
+        assert tracker.track_confirmed_sides[10] == 0
+
+        # Frame 2: Person moves inside (centroid y=80, which is outside the dead zone y > 55)
+        boxes_a2 = MockBoxes([[40, 70, 60, 90]], [10], [0.96])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_a2)]
+        tracker.process_frame(frame)
+
+        # Verify side resolved to INSIDE (+1)
+        assert tracker.track_confirmed_sides[10] == 1
+
+        # 2. SCENARIO B: Resolving collinear to OUTSIDE (-1)
+        # Frame 1: Person starts exactly collinear at y=50
+        boxes_b1 = MockBoxes([[40, 40, 60, 60]], [20], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_b1)]
+        tracker.process_frame(frame)
+
+        # Verify initial side is collinear (0)
+        assert tracker.track_confirmed_sides[20] == 0
+
+        # Frame 2: Person moves outside (centroid y=20, which is outside the dead zone y < 45)
+        boxes_b2 = MockBoxes([[40, 10, 60, 30]], [20], [0.96])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_b2)]
+        tracker.process_frame(frame)
+
+        # Verify side resolved to OUTSIDE (-1)
+        assert tracker.track_confirmed_sides[20] == -1
+
+
