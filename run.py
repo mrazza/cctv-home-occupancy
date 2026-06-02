@@ -96,7 +96,9 @@ def main():
         tracker = ObjectTracker(
             tripwire_line=tripwire_line,
             snapshot_dir=CONFIG.snapshot_dir,
-            dead_zone_width=CONFIG.tripwire_dead_zone_width
+            dead_zone_width=CONFIG.tripwire_dead_zone_width,
+            conf=CONFIG.tracker_confidence,
+            track_buffer=CONFIG.track_buffer
         )
         from src.motion_detector import MotionDetector
         detector = MotionDetector(

@@ -42,6 +42,16 @@ class CameraConfig(BaseModel):
                     "The centroid must move beyond half this width on the far side of the line to register a crossing. "
                     "Set to 0.0 to disable the dead zone."
     )
+    tracker_confidence: float = Field(
+        default=0.1,
+        description="Minimum detection confidence threshold for YOLO person detections (0.0 to 1.0). "
+                    "Lower values catch more detections but may increase false positives."
+    )
+    track_buffer: int = Field(
+        default=30,
+        description="Number of frames to keep lost tracks alive before reassigning a new tracker ID. "
+                    "At 10 FPS, the default of 30 means tracks survive 3 seconds of occlusion."
+    )
     
     # Database Settings
     db_path: str = Field(default="db/presence.db", description="Path to SQLite database file")
@@ -85,6 +95,8 @@ def load_config() -> CameraConfig:
         "CCTV_SNAPSHOT_DIR": ("snapshot_dir", str),
         "CCTV_WEBHOOK_TIMEOUT": ("webhook_timeout", int),
         "CCTV_DEAD_ZONE_WIDTH": ("tripwire_dead_zone_width", float),
+        "CCTV_TRACKER_CONFIDENCE": ("tracker_confidence", float),
+        "CCTV_TRACK_BUFFER": ("track_buffer", int),
     }
     
     # Handle CCTV_WEBHOOK_URLS env variable
