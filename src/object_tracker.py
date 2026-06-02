@@ -36,6 +36,24 @@ class ObjectTracker:
             conf: Minimum detection confidence threshold for YOLO person detections (0.0 to 1.0).
             track_buffer: Number of frames to keep lost tracks alive before reassigning a new tracker ID.
         """
+        # Disable Ultralytics telemetry and sync settings to prevent periodic network lag
+        try:
+            from ultralytics import settings
+            settings.update({
+                "sync": False,
+                "clearml": False,
+                "comet": False,
+                "dvc": False,
+                "hub": False,
+                "mlflow": False,
+                "neptune": False,
+                "raytune": False,
+                "tensorboard": False,
+                "wandb": False
+            })
+        except Exception as e:
+            logger.warning(f"Could not disable YOLO telemetry/sync settings: {e}")
+
         # Load YOLO model
         self.model = YOLO(model_name)
         
@@ -83,7 +101,7 @@ new_track_thresh: 0.25
 track_buffer: {track_buffer}
 match_thresh: 0.8
 fuse_score: true
-gmc_method: sparseOptFlow
+gmc_method: none
 proximity_thresh: 0.5
 appearance_thresh: 0.8
 with_reid: false

@@ -25,14 +25,15 @@ COLOR_DARK_GRAY = (30, 30, 30)
 
 def draw_hud_sidebar(frame, tracker, is_paused, show_roi, show_tripwire, show_history, fps, frame_count, source_name):
     h, w, _ = frame.shape
-    
-    # 1. Overlay panel (semi-transparent dark background)
     hud_w = 340
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (10, 10), (hud_w, h - 10), (15, 15, 15), -1)
     
-    # Blend with original frame (alpha = 0.82)
-    cv2.addWeighted(overlay, 0.82, frame, 0.18, 0, frame)
+    # 1. Overlay panel (semi-transparent dark background) - Optimized ROI crop/blend
+    sub_frame = frame[10:h - 10, 10:hud_w]
+    overlay = sub_frame.copy()
+    cv2.rectangle(overlay, (0, 0), (hud_w - 10, h - 20), (15, 15, 15), -1)
+    
+    # Blend with original sub-frame view
+    cv2.addWeighted(overlay, 0.82, sub_frame, 0.18, 0, sub_frame)
     
     # Draw a thin stylish cyan border around the HUD panel
     cv2.rectangle(frame, (10, 10), (hud_w, h - 10), COLOR_CYAN, 1, cv2.LINE_AA)
@@ -197,10 +198,21 @@ def draw_tripwires(frame, tracker):
         dead_zone_half_px = (dead_zone_width * h) / 2.0
         (ins_A, ins_B), (out_A, out_B) = compute_dead_zone_lines(pt_A, pt_B, dead_zone_half_px)
         
-        overlay = frame.copy()
-        zone_polygon = np.array([ins_A, ins_B, out_B, out_A], dtype=np.int32)
-        cv2.fillPoly(overlay, [zone_polygon], COLOR_GOLD)
-        cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
+        # Optimized: crop polygon bounding box ROI to avoid full-frame copy/blend
+        pts = np.array([ins_A, ins_B, out_B, out_A], dtype=np.int32)
+        x_box, y_box, w_box, h_box = cv2.boundingRect(pts)
+        
+        x1 = max(0, x_box)
+        y1 = max(0, y_box)
+        x2 = min(w, x_box + w_box)
+        y2 = min(h, y_box + h_box)
+        
+        if x2 > x1 and y2 > y1:
+            sub_frame = frame[y1:y2, x1:x2]
+            overlay = sub_frame.copy()
+            local_pts = pts - np.array([x1, y1])
+            cv2.fillPoly(overlay, [local_pts], COLOR_GOLD)
+            cv2.addWeighted(overlay, 0.15, sub_frame, 0.85, 0, sub_frame)
         
         cv2.line(frame, ins_A, ins_B, (0, 200, 220), 1, cv2.LINE_AA)
         cv2.line(frame, out_A, out_B, (0, 200, 220), 1, cv2.LINE_AA)
@@ -280,6 +292,7 @@ def main():
     is_live = args.rtsp.startswith("rtsp://") or args.rtsp.startswith("rtmp://")
     reader = None
     cap = None
+    video_fps = 30.0
 
     if is_live:
         print(f"[*] Connecting to live video stream: {args.rtsp}")
@@ -290,6 +303,9 @@ def main():
         if not cap.isOpened():
             print(f"[-] Error: Could not open video source '{args.rtsp}'")
             sys.exit(1)
+        video_fps = cap.get(cv2.CAP_PROP_FPS)
+        if video_fps <= 0 or np.isnan(video_fps) or video_fps > 120.0:
+            video_fps = 30.0
 
     # State variables
     is_paused = False
@@ -308,10 +324,14 @@ def main():
     current_frame = None
 
     while True:
+        loop_start_time = time.time()
+        has_new_frame = False
+        
         if not is_paused:
             if is_live:
                 ret, frame = reader.read()
                 if ret and frame is not None:
+                    has_new_frame = True
                     frame_count += 1
                     current_frame = frame.copy()
                     _ = tracker.process_frame(current_frame)
@@ -330,6 +350,7 @@ def main():
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 
+                has_new_frame = True
                 frame_count += 1
                 current_frame = frame.copy()
                 _ = tracker.process_frame(current_frame)
@@ -346,34 +367,45 @@ def main():
             time.sleep(0.01)
             continue
 
-        # Draw overlays on top of current frame copy
-        frame_draw = current_frame.copy()
-        
-        # 1. Render active tracks and bounding boxes
-        draw_tracking_boxes(frame_draw, tracker)
-        
-        # 2. Render track history trails
-        if show_history:
-            draw_history_trails(frame_draw, tracker)
+        # If it is live mode, we are not paused, and no new frame arrived:
+        # Pump GUI events briefly and bypass visual rendering to avoid frame hiccups
+        if is_live and not is_paused and not has_new_frame:
+            key = cv2.waitKey(1) & 0xFF
+        else:
+            # Draw overlays on top of current frame copy
+            frame_draw = current_frame.copy()
             
-        # 3. Render Motion ROI polygon
-        if show_roi:
-            draw_motion_roi(frame_draw)
+            # 1. Render active tracks and bounding boxes
+            draw_tracking_boxes(frame_draw, tracker)
             
-        # 4. Render tripwires and dead zones
-        if show_tripwire:
-            draw_tripwires(frame_draw, tracker)
-            
-        # 5. Render HUD sidebar on left
-        draw_hud_sidebar(
-            frame_draw, tracker, is_paused, show_roi, show_tripwire, show_history,
-            fps, frame_count, args.rtsp
-        )
+            # 2. Render track history trails
+            if show_history:
+                draw_history_trails(frame_draw, tracker)
+                
+            # 3. Render Motion ROI polygon
+            if show_roi:
+                draw_motion_roi(frame_draw)
+                
+            # 4. Render tripwires and dead zones
+            if show_tripwire:
+                draw_tripwires(frame_draw, tracker)
+                
+            # 5. Render HUD sidebar on left
+            draw_hud_sidebar(
+                frame_draw, tracker, is_paused, show_roi, show_tripwire, show_history,
+                fps, frame_count, args.rtsp
+            )
 
-        cv2.imshow(window_name, frame_draw)
-        
-        # Keyboard handling (Wait 30ms or adjust based on performance)
-        key = cv2.waitKey(30) & 0xFF
+            cv2.imshow(window_name, frame_draw)
+            
+            # Determine appropriate wait delay
+            if is_live:
+                wait_time = 1
+            else:
+                elapsed_ms = (time.time() - loop_start_time) * 1000.0
+                wait_time = max(1, int((1000.0 / video_fps) - elapsed_ms))
+                
+            key = cv2.waitKey(wait_time) & 0xFF
         
         if key == ord('q') or key == 27:  # Q or ESC
             print("[*] Exiting visualization utility...")
