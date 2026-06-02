@@ -1,6 +1,5 @@
 import os
 import json
-import pytest
 from src.config import load_config, CameraConfig
 
 def test_load_config_defaults(monkeypatch):

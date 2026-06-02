@@ -1,4 +1,3 @@
-import pytest
 from src.types import CrossingEvent, PresenceState, DatabaseEvent
 
 def test_crossing_event_attributes():

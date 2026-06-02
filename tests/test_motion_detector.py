@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 from src.motion_detector import MotionDetector
 
 def test_motion_detector_init():

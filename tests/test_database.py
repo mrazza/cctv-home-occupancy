@@ -1,4 +1,3 @@
-import pytest
 from src.database import DatabaseManager
 
 def test_database_initialization(db_manager):

@@ -1,8 +1,5 @@
 import os
-import sys
 import logging
-import pytest
-import numpy as np
 from src.logger import setup_logging
 
 def test_setup_logging_console_and_file(temp_dir):

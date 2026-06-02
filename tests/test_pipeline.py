@@ -1,14 +1,11 @@
 import time
 import numpy as np
-import pytest
 from unittest.mock import MagicMock, patch
-import cv2
 import logging
-from src.database import DatabaseManager
-from src.pipeline import PipelineOrchestrator, ThreadedVideoReader, FrameRegistry
+from src.pipeline import PipelineOrchestrator, ThreadedVideoReader
 from src.motion_detector import MotionDetector
 from src.object_tracker import ObjectTracker
-from src.types import CrossingEvent, PresenceState
+from src.types import CrossingEvent
 
 def test_pipeline_states_idle_to_active(db_manager):
     """Verifies that the orchestrator switches states correctly when motion is detected."""

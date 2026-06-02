@@ -1,5 +1,3 @@
-import pytest
-import numpy as np
 from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines
 
 def test_calculate_arrow_endpoint_normal():

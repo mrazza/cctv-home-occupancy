@@ -1,8 +1,7 @@
 import os
-import cv2
 import numpy as np
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from src.object_tracker import ObjectTracker
 
 def test_get_point_side():

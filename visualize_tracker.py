@@ -3,10 +3,8 @@ import os
 import sys
 import cv2
 import time
-import json
 import argparse
 import numpy as np
-from typing import Tuple, List, Optional
 
 # Load config and custom types/trackers
 from src.config import CONFIG, load_config

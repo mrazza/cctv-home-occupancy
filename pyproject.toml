@@ -29,7 +29,7 @@ addopts = "-ra -q --tb=short"
 testpaths = [
     "tests",
 ]
-pythonpath = ["src"]
+pythonpath = [".", "src"]
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::UserWarning",
