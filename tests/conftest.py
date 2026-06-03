@@ -2,6 +2,9 @@ import os
 import shutil
 import tempfile
 import pytest
+
+os.environ.setdefault("CCTV_CONFIG_PATH", "non_existent_test_config.json")
+
 from src.config import CameraConfig
 from src.database import DatabaseManager
 
@@ -28,3 +31,21 @@ def db_manager(test_config):
     """Provides an initialized DatabaseManager instance pointed to a temporary SQLite database."""
     manager = DatabaseManager(test_config.db_path)
     return manager
+
+@pytest.fixture(autouse=True)
+def reset_frame_registry():
+    """Resets FrameRegistry singleton state before each test to prevent cross-test pollution."""
+    from src.pipeline import FrameRegistry
+    with FrameRegistry._lock:
+        FrameRegistry._last_frame = None
+        FrameRegistry._last_timestamp = 0.0
+        FrameRegistry._last_timestamp_iso = None
+    yield
+
+@pytest.fixture(autouse=True)
+def reset_orchestrator_registry():
+    """Saves and restores OrchestratorRegistry singleton state to prevent cross-test pollution."""
+    from src.pipeline import OrchestratorRegistry
+    original = OrchestratorRegistry.get_instance()
+    yield
+    OrchestratorRegistry.set_instance(original)

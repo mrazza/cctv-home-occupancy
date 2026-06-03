@@ -112,8 +112,11 @@ def main():
             tripwire_line=tripwire_line,
             snapshot_dir=CONFIG.snapshot_dir,
             dead_zone_width=CONFIG.tripwire_dead_zone_width,
+            tripwire_strict_segment=CONFIG.tripwire_strict_segment,
             conf=CONFIG.tracker_confidence,
-            track_buffer=CONFIG.track_buffer
+            track_buffer=CONFIG.track_buffer,
+            yolo_imgsz=CONFIG.yolo_imgsz,
+            yolo_device=CONFIG.yolo_device
         )
         from src.motion_detector import MotionDetector
         detector = MotionDetector(

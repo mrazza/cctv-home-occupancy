@@ -21,10 +21,6 @@ def setup_test_db(db_manager):
 
 def test_api_get_status_initial():
     """Verifies initially the status is empty / no one home."""
-    from src.pipeline import FrameRegistry
-    with FrameRegistry._lock:
-        FrameRegistry._last_timestamp_iso = None
-
     response = client.get("/status")
     assert response.status_code == 200
     data = response.json()
@@ -42,21 +38,17 @@ def test_api_get_status_with_system_states():
     mock_orchestrator.state = "IDLE"
     mock_orchestrator.object_tracker.session_id = "test-session-id-123"
     
-    original_instance = OrchestratorRegistry.get_instance()
     OrchestratorRegistry.set_instance(mock_orchestrator)
-    try:
-        response = client.get("/status")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["system_state"] == "IDLE"
-        
-        mock_orchestrator.state = "ACTIVE"
-        response2 = client.get("/status")
-        assert response2.status_code == 200
-        data2 = response2.json()
-        assert data2["system_state"] == "ACTIVE"
-    finally:
-        OrchestratorRegistry.set_instance(original_instance)
+    response = client.get("/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["system_state"] == "IDLE"
+    
+    mock_orchestrator.state = "ACTIVE"
+    response2 = client.get("/status")
+    assert response2.status_code == 200
+    data2 = response2.json()
+    assert data2["system_state"] == "ACTIVE"
 
 
 def test_api_get_status_with_frame_processed():
@@ -283,11 +275,6 @@ def test_api_get_frame_with_resizing():
 def test_api_get_frame_fallback_success(monkeypatch):
     """Verifies fallback to VideoCapture when the registry has no frame."""
     import numpy as np
-    from src.pipeline import FrameRegistry
-
-    # Clear registry
-    with FrameRegistry._lock:
-        FrameRegistry._last_frame = None
 
     # Mock cv2.VideoCapture
     class MockVideoCapture:
@@ -312,11 +299,6 @@ def test_api_get_frame_fallback_success(monkeypatch):
 
 def test_api_get_frame_fallback_capture_fail(monkeypatch):
     """Verifies 503 error is returned if fallback VideoCapture fails to open."""
-    from src.pipeline import FrameRegistry
-
-    with FrameRegistry._lock:
-        FrameRegistry._last_frame = None
-
     class MockVideoCaptureFail:
         def __init__(self, src):
             self.src = src
@@ -334,11 +316,6 @@ def test_api_get_frame_fallback_capture_fail(monkeypatch):
 
 def test_api_get_frame_fallback_read_fail(monkeypatch):
     """Verifies 503 error is returned if fallback VideoCapture fails to read a frame."""
-    from src.pipeline import FrameRegistry
-
-    with FrameRegistry._lock:
-        FrameRegistry._last_frame = None
-
     class MockVideoCaptureReadFail:
         def __init__(self, src):
             self.src = src
@@ -391,7 +368,6 @@ def test_api_trigger_motion_endpoint_orchestrator_not_initialized():
     original_mode = CONFIG.trigger_mode
     CONFIG.trigger_mode = "event"
     
-    original_instance = OrchestratorRegistry.get_instance()
     OrchestratorRegistry.set_instance(None)
     
     try:
@@ -400,7 +376,6 @@ def test_api_trigger_motion_endpoint_orchestrator_not_initialized():
         assert "orchestrator is not running" in response.json()["detail"]
     finally:
         CONFIG.trigger_mode = original_mode
-        OrchestratorRegistry.set_instance(original_instance)
 
 
 def test_api_trigger_motion_endpoint_success():
@@ -414,7 +389,6 @@ def test_api_trigger_motion_endpoint_success():
     mock_orchestrator = MagicMock()
     mock_orchestrator.active_until = 12345.67
     
-    original_instance = OrchestratorRegistry.get_instance()
     OrchestratorRegistry.set_instance(mock_orchestrator)
     
     try:
@@ -424,5 +398,4 @@ def test_api_trigger_motion_endpoint_success():
         mock_orchestrator.trigger_event_window.assert_called_once_with(duration=CONFIG.event_stream_duration)
     finally:
         CONFIG.trigger_mode = original_mode
-        OrchestratorRegistry.set_instance(original_instance)
 
