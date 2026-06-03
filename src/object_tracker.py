@@ -270,25 +270,29 @@ with_reid: false
                     if self.tripwire_strict_segment:
                         in_bounds = self._is_point_in_segment_bounds(A, B, curr_point)
                     
-                    if in_bounds:
-                        # Hysteresis crossing logic:
-                        # Centroid must cross to the opposite side and exceed the dead zone boundary.
-                        if confirmed_side == -1 and signed_dist > dead_zone_half_px:
-                            event_type = "ENTER"
+                    # Always evaluate side changes to prevent stale states if the subject crosses outside bounds.
+                    side_changed = False
+                    if confirmed_side == -1 and signed_dist > dead_zone_half_px:
+                        self.track_confirmed_sides[tracker_id] = 1
+                        side_changed = True
+                    elif confirmed_side == 1 and signed_dist < -dead_zone_half_px:
+                        self.track_confirmed_sides[tracker_id] = -1
+                        side_changed = True
+                    elif confirmed_side == 0:
+                        if signed_dist > dead_zone_half_px:
                             self.track_confirmed_sides[tracker_id] = 1
-                            logger.info(f"Tracker {tracker_id} crossed tripwire: OUTSIDE -> INSIDE (ENTER), signed_dist: {signed_dist:.1f}, dead_zone_half: {dead_zone_half_px:.1f}")
-                        elif confirmed_side == 1 and signed_dist < -dead_zone_half_px:
-                            event_type = "LEAVE"
+                            logger.info(f"Tracker {tracker_id} resolved from COLLINEAR -> INSIDE (+1), signed_dist: {signed_dist:.1f}")
+                        elif signed_dist < -dead_zone_half_px:
                             self.track_confirmed_sides[tracker_id] = -1
+                            logger.info(f"Tracker {tracker_id} resolved from COLLINEAR -> OUTSIDE (-1), signed_dist: {signed_dist:.1f}")
+
+                    if in_bounds and side_changed:
+                        if self.track_confirmed_sides[tracker_id] == 1:
+                            event_type = "ENTER"
+                            logger.info(f"Tracker {tracker_id} crossed tripwire: OUTSIDE -> INSIDE (ENTER), signed_dist: {signed_dist:.1f}, dead_zone_half: {dead_zone_half_px:.1f}")
+                        elif self.track_confirmed_sides[tracker_id] == -1:
+                            event_type = "LEAVE"
                             logger.info(f"Tracker {tracker_id} crossed tripwire: INSIDE -> OUTSIDE (LEAVE), signed_dist: {signed_dist:.1f}, dead_zone_half: {dead_zone_half_px:.1f}")
-                        elif confirmed_side == 0:
-                            # If initially collinear, commit to whichever side the centroid moves towards
-                            if signed_dist > dead_zone_half_px:
-                                self.track_confirmed_sides[tracker_id] = 1
-                                logger.info(f"Tracker {tracker_id} resolved from COLLINEAR -> INSIDE (+1), signed_dist: {signed_dist:.1f}")
-                            elif signed_dist < -dead_zone_half_px:
-                                self.track_confirmed_sides[tracker_id] = -1
-                                logger.info(f"Tracker {tracker_id} resolved from COLLINEAR -> OUTSIDE (-1), signed_dist: {signed_dist:.1f}")
                             
                     if event_type:
                         bbox = (int(x1), int(y1), int(x2), int(y2))

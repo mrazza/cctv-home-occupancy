@@ -110,7 +110,7 @@ class PipelineOrchestrator:
     def trigger_event_window(self, duration: int):
         """Triggers or extends the active window for on-demand stream processing."""
         with self.lock:
-            self.active_until = time.time() + duration
+            self.active_until = max(self.active_until, time.time() + duration)
             logger.info(f"On-demand event-driven window triggered/extended until epoch {self.active_until} (for {duration}s)")
 
     def process_single_frame(self, frame: cv2.Mat) -> List[CrossingEvent]:
