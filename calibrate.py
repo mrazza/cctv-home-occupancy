@@ -255,6 +255,26 @@ class CalibrationApp:
         cv2.namedWindow(window_name)
         cv2.setMouseCallback(window_name, self.mouse_callback)
 
+        # Aspect ratio correction parameters
+        par_correction = 1.0
+        if CONFIG.aspect_ratio_override is not None:
+            # Computed dynamically on the first frame
+            par_correction = None
+        else:
+            try:
+                sar_num = self.cap.get(cv2.CAP_PROP_SAR_NUM)
+                sar_den = self.cap.get(cv2.CAP_PROP_SAR_DEN)
+                if isinstance(sar_num, (int, float)) and isinstance(sar_den, (int, float)) and sar_num > 0 and sar_den > 0:
+                    par_correction = sar_num / sar_den
+                    if abs(par_correction - 1.0) > 1e-4:
+                        print(f"[*] Auto-detected non-square pixels from stream metadata. PAR correction factor: {par_correction:.4f}")
+                    else:
+                        par_correction = 1.0
+                else:
+                    par_correction = 1.0
+            except Exception:
+                par_correction = 1.0
+
         while True:
             ret, frame = self.cap.read()
             if not ret or frame is None:
@@ -264,6 +284,17 @@ class CalibrationApp:
                     print("[-] Error: Failed to retrieve frame from stream.")
                     break
             else:
+                # Apply aspect ratio correction
+                if CONFIG.aspect_ratio_override is not None and par_correction is None:
+                    h, w = frame.shape[:2]
+                    par_correction = CONFIG.aspect_ratio_override / (w / h)
+                    print(f"[*] Computed PAR correction from aspect ratio override: {par_correction:.4f} (Raw: {w}x{h}, Target: {CONFIG.aspect_ratio_override:.4f})")
+                
+                if par_correction is not None and abs(par_correction - 1.0) > 1e-4:
+                    h, w = frame.shape[:2]
+                    new_w = int(round(w * par_correction))
+                    frame = cv2.resize(frame, (new_w, h), interpolation=cv2.INTER_LINEAR)
+
                 self.frame = frame.copy()
                 
             frame_draw = frame.copy()

@@ -10,6 +10,12 @@ class CameraConfig(BaseModel):
     video_buffer_size: int = Field(default=1, description="Size of the OpenCV VideoCapture buffer queue")
     yolo_imgsz: int = Field(default=640, description="Image size (resolution) for YOLO inference")
     yolo_device: Optional[str] = Field(default=None, description="Device to run YOLO model on (e.g. 'cpu', 'cuda', '0')")
+    aspect_ratio_override: Optional[float] = Field(
+        default=None, 
+        description="Optional manual display aspect ratio override (e.g. 1.7778 for 16:9 or 1.3333 for 4:3). "
+                    "If set, the stream will be resized to match this aspect ratio. "
+                    "If null, the system attempts to auto-detect using stream metadata (SAR)."
+    )
     
     # API Server Settings
     host: str = Field(default="0.0.0.0", description="IP address to bind the API server to")
@@ -125,6 +131,7 @@ def load_config() -> CameraConfig:
         "CCTV_VIDEO_BUFFER_SIZE": ("video_buffer_size", int),
         "CCTV_YOLO_IMGSZ": ("yolo_imgsz", int),
         "CCTV_YOLO_DEVICE": ("yolo_device", lambda x: None if x.lower() in ("null", "none", "") else str(x)),
+        "CCTV_ASPECT_RATIO_OVERRIDE": ("aspect_ratio_override", lambda x: None if x.lower() in ("null", "none", "") else float(x)),
     }
     
     # Handle CCTV_WEBHOOK_URLS env variable

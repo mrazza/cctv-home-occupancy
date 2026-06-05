@@ -594,5 +594,54 @@ def test_threaded_video_reader_timeout_reconnect():
         assert mock_vc_class.call_count >= 2
 
 
+def test_threaded_video_reader_aspect_ratio_correction(monkeypatch):
+    """Tests that aspect ratio correction behaves correctly with both override and auto-detect."""
+    from src.config import CONFIG
+    import cv2
+    
+    # 1. Test aspect ratio override
+    monkeypatch.setattr(CONFIG, "aspect_ratio_override", 1.7778)
+    
+    with patch('src.pipeline.cv2.VideoCapture') as mock_vc_class:
+        mock_cap = MagicMock()
+        mock_vc_class.return_value = mock_cap
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.side_effect = lambda prop: 0.0
+        
+        reader = ThreadedVideoReader("rtsp://test-url")
+        dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        corrected = reader._apply_aspect_ratio_correction(dummy_frame)
+        
+        # Expected new width: int(480 * 1.7778) = 853
+        assert corrected.shape[1] == 853
+        assert corrected.shape[0] == 480
+        
+    # 2. Test auto-detect aspect ratio (non-square pixels)
+    monkeypatch.setattr(CONFIG, "aspect_ratio_override", None)
+    
+    with patch('src.pipeline.cv2.VideoCapture') as mock_vc_class:
+        mock_cap = MagicMock()
+        mock_vc_class.return_value = mock_cap
+        mock_cap.isOpened.return_value = True
+        
+        def mock_get(prop):
+            if prop == cv2.CAP_PROP_SAR_NUM:
+                return 4.0
+            if prop == cv2.CAP_PROP_SAR_DEN:
+                return 3.0
+            return 0.0
+        mock_cap.get.side_effect = mock_get
+        
+        reader = ThreadedVideoReader("rtsp://test-url")
+        assert reader.par_correction == 4.0 / 3.0
+        
+        dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        corrected = reader._apply_aspect_ratio_correction(dummy_frame)
+        
+        assert corrected.shape[1] == 853
+        assert corrected.shape[0] == 480
+
+
+
 
 

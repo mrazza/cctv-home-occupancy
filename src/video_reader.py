@@ -24,6 +24,50 @@ class ThreadedVideoReader:
         self.thread: Optional[threading.Thread] = None
         self._last_read_time = time.time()
         self._frame_count = 0
+        
+        # Aspect ratio correction parameters
+        self.par_correction = 1.0
+        self._detect_aspect_ratio_correction()
+
+    def _detect_aspect_ratio_correction(self):
+        """Detects if aspect ratio correction is needed based on config or stream metadata."""
+        if CONFIG.aspect_ratio_override is not None:
+            # Computed dynamically on first read frame once width/height are known.
+            logger.info(f"Aspect ratio override configured: {CONFIG.aspect_ratio_override}")
+            self.par_correction = None
+            return
+
+        # Attempt to auto-detect using stream metadata (SAR)
+        try:
+            sar_num = self.cap.get(cv2.CAP_PROP_SAR_NUM)
+            sar_den = self.cap.get(cv2.CAP_PROP_SAR_DEN)
+            if isinstance(sar_num, (int, float)) and isinstance(sar_den, (int, float)) and sar_num > 0 and sar_den > 0:
+                self.par_correction = sar_num / sar_den
+                if abs(self.par_correction - 1.0) > 1e-4:
+                    logger.info(f"Auto-detected non-square pixels from stream metadata. PAR correction factor: {self.par_correction:.4f}")
+                else:
+                    self.par_correction = 1.0
+            else:
+                self.par_correction = 1.0
+        except Exception:
+            self.par_correction = 1.0
+
+    def _apply_aspect_ratio_correction(self, frame: cv2.Mat) -> cv2.Mat:
+        """Resizes the frame to correct aspect ratio distortions if correction factor is active."""
+        h, w = frame.shape[:2]
+        
+        # Calculate dynamic PAR correction if override is configured and hasn't been computed yet
+        if CONFIG.aspect_ratio_override is not None and self.par_correction is None:
+            current_aspect = w / h
+            target_aspect = CONFIG.aspect_ratio_override
+            self.par_correction = target_aspect / current_aspect
+            logger.info(f"Computed PAR correction from aspect ratio override: {self.par_correction:.4f} (Raw: {w}x{h}, Target: {target_aspect:.4f})")
+            
+        if self.par_correction is not None and abs(self.par_correction - 1.0) > 1e-4:
+            new_w = int(round(w * self.par_correction))
+            frame = cv2.resize(frame, (new_w, h), interpolation=cv2.INTER_LINEAR)
+            
+        return frame
 
     def start(self):
         """
@@ -52,6 +96,7 @@ class ThreadedVideoReader:
                 self.cap.release()
                 time.sleep(1.0)
                 self.cap = cv2.VideoCapture(self.src)
+                self._detect_aspect_ratio_correction()
                 self._last_read_time = time.time()
                 continue
 
@@ -67,6 +112,7 @@ class ThreadedVideoReader:
                 frame = None
 
             if ret and frame is not None:
+                frame = self._apply_aspect_ratio_correction(frame)
                 with self.lock:
                     self.ret = True
                     self.frame = frame
@@ -81,6 +127,7 @@ class ThreadedVideoReader:
                     self.cap.release()
                     time.sleep(1.0)
                     self.cap = cv2.VideoCapture(self.src)
+                    self._detect_aspect_ratio_correction()
                     self._last_read_time = time.time()  # Reset to prevent continuous instant reconnect loops
                 else:
                     time.sleep(0.001)
