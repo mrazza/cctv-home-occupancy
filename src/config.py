@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel, Field
 
 class CameraConfig(BaseModel):
@@ -8,7 +8,7 @@ class CameraConfig(BaseModel):
     model_name: str = Field(default="yolov8n.pt", description="YOLO model configuration name or local PT path")
     fps_limit: int = Field(default=10, description="Target frames per second to process")
     video_buffer_size: int = Field(default=1, description="Size of the OpenCV VideoCapture buffer queue")
-    yolo_imgsz: int = Field(default=640, description="Image size (resolution) for YOLO inference")
+    yolo_imgsz: Union[int, list[int]] = Field(default=640, description="Image size (resolution) for YOLO inference")
     yolo_device: Optional[str] = Field(default=None, description="Device to run YOLO model on (e.g. 'cpu', 'cuda', '0')")
     aspect_ratio_override: Optional[float] = Field(
         default=None, 
@@ -78,6 +78,17 @@ class CameraConfig(BaseModel):
     webhook_urls: list[str] = Field(default_factory=list, description="List of webhook URLs to trigger on events")
     webhook_timeout: int = Field(default=5, description="Timeout in seconds for the webhook requests")
 
+def _parse_yolo_imgsz(x: str) -> Union[int, list[int]]:
+    try:
+        parsed = json.loads(x)
+        if isinstance(parsed, list):
+            return [int(v) for v in parsed]
+        return int(parsed)
+    except Exception:
+        if "," in x:
+            return [int(v.strip()) for v in x.split(",") if v.strip()]
+        return int(x)
+
 def load_config() -> CameraConfig:
     """
     Loads the system configuration.
@@ -129,7 +140,7 @@ def load_config() -> CameraConfig:
         "CCTV_TRACKER_CONFIDENCE": ("tracker_confidence", float),
         "CCTV_TRACK_BUFFER": ("track_buffer", int),
         "CCTV_VIDEO_BUFFER_SIZE": ("video_buffer_size", int),
-        "CCTV_YOLO_IMGSZ": ("yolo_imgsz", int),
+        "CCTV_YOLO_IMGSZ": ("yolo_imgsz", _parse_yolo_imgsz),
         "CCTV_YOLO_DEVICE": ("yolo_device", lambda x: None if x.lower() in ("null", "none", "") else str(x)),
         "CCTV_ASPECT_RATIO_OVERRIDE": ("aspect_ratio_override", lambda x: None if x.lower() in ("null", "none", "") else float(x)),
     }

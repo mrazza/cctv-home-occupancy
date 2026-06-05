@@ -231,3 +231,23 @@ def test_load_config_webhook_env_invalid_json(monkeypatch):
     config = load_config()
     assert config.webhook_urls == ['["http://webhook1.internal"']
 
+
+def test_load_config_yolo_imgsz_env_variations(monkeypatch):
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    
+    # Test JSON list format
+    monkeypatch.setenv("CCTV_YOLO_IMGSZ", "[480, 864]")
+    config = load_config()
+    assert config.yolo_imgsz == [480, 864]
+    
+    # Test comma-separated string format
+    monkeypatch.setenv("CCTV_YOLO_IMGSZ", "480, 864")
+    config = load_config()
+    assert config.yolo_imgsz == [480, 864]
+    
+    # Test standard integer format
+    monkeypatch.setenv("CCTV_YOLO_IMGSZ", "640")
+    config = load_config()
+    assert config.yolo_imgsz == 640
+
+
