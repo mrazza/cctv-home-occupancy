@@ -388,6 +388,15 @@ def reload_config_settings(config_path: str, tracker: ObjectTracker) -> bool:
         return False
 
 
+def parse_imgsz_arg(val: str):
+    if "," in val:
+        return [int(x.strip()) for x in val.split(",") if x.strip()]
+    try:
+        return int(val)
+    except ValueError:
+        raise argparse.ArgumentTypeError("yolo-imgsz must be an integer or comma-separated integers (e.g. 640 or 480,864)")
+
+
 def main():
     """
     CLI Entry point. Initializes ObjectTracker, connects to RTSP stream or offline file,
@@ -409,7 +418,7 @@ def main():
                         help="OpenCV VideoCapture buffer size")
     parser.add_argument("--config", type=str, default="config.json",
                         help="Path to JSON configuration file")
-    parser.add_argument("--yolo-imgsz", type=int, default=CONFIG.yolo_imgsz,
+    parser.add_argument("--yolo-imgsz", type=parse_imgsz_arg, default=CONFIG.yolo_imgsz,
                         help="YOLO inference image size (default from config)")
     parser.add_argument("--yolo-device", type=str, default=CONFIG.yolo_device,
                         help="Device to run YOLO on (e.g. 'cpu', 'cuda', '0')")
@@ -458,6 +467,21 @@ def main():
     last_fps_calc = time.time()
     fps_frames = 0
     
+    # Aspect ratio correction parameters for offline files
+    par_correction = 1.0
+    if not is_live:
+        sar_num = cap.get(cv2.CAP_PROP_SAR_NUM)
+        sar_den = cap.get(cv2.CAP_PROP_SAR_DEN)
+        if CONFIG.aspect_ratio_override is not None:
+            # Computed dynamically on the first frame
+            par_correction = None
+        elif isinstance(sar_num, (int, float)) and isinstance(sar_den, (int, float)) and sar_num > 0 and sar_den > 0:
+            par_correction = sar_num / sar_den
+            if abs(par_correction - 1.0) > 1e-4:
+                logger.info(f"Auto-detected non-square pixels from offline video metadata. PAR correction factor: {par_correction:.4f}")
+            else:
+                par_correction = 1.0
+    
     window_name = "Antigravity YOLO Tracker Visualization Utility"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
@@ -505,6 +529,17 @@ def main():
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 
+                # Apply aspect ratio correction for offline files
+                if CONFIG.aspect_ratio_override is not None and par_correction is None:
+                    h_f, w_f = frame.shape[:2]
+                    par_correction = CONFIG.aspect_ratio_override / (w_f / h_f)
+                    logger.info(f"Computed PAR correction from aspect ratio override: {par_correction:.4f} (Raw: {w_f}x{h_f}, Target: {CONFIG.aspect_ratio_override:.4f})")
+                
+                if par_correction is not None and abs(par_correction - 1.0) > 1e-4:
+                    h_f, w_f = frame.shape[:2]
+                    new_w = int(round(w_f * par_correction))
+                    frame = cv2.resize(frame, (new_w, h_f), interpolation=cv2.INTER_LINEAR)
+
                 has_new_frame = True
                 frame_count += 1
                 current_frame = frame.copy()
