@@ -1,15 +1,21 @@
+import os
 import cv2
 import time
 import threading
 import logging
-from typing import Optional, Tuple
+from collections import deque
+from datetime import datetime
+from typing import Optional, Tuple, List
 from src.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
 class ThreadedVideoReader:
-    def __init__(self, src: str, buffer_size: Optional[int] = None):
-        """Thread-safe background video reader to always retrieve the freshest frame."""
+    def __init__(self, src: str, buffer_size: Optional[int] = None, rolling_buffer_seconds: float = 10.0, fps_estimate: int = 10):
+        """
+        Thread-safe background video reader to always retrieve the freshest frame,
+        with an integrated rolling circular buffer for diagnostic video clip generation.
+        """
         self.src = src
         self.cap = cv2.VideoCapture(src)
         
@@ -24,6 +30,10 @@ class ThreadedVideoReader:
         self.thread: Optional[threading.Thread] = None
         self._last_read_time = time.time()
         self._frame_count = 0
+        
+        # Rolling frame circular buffer for telemetry / diagnostic clips
+        max_buffered = int(max(10, rolling_buffer_seconds * fps_estimate))
+        self.frame_buffer: deque[Tuple[float, cv2.Mat]] = deque(maxlen=max_buffered)
         
         # Aspect ratio correction parameters
         self.par_correction = 1.0
@@ -113,10 +123,12 @@ class ThreadedVideoReader:
 
             if ret and frame is not None:
                 frame = self._apply_aspect_ratio_correction(frame)
+                now_ts = time.time()
                 with self.lock:
                     self.ret = True
                     self.frame = frame
-                self._last_read_time = time.time()
+                    self.frame_buffer.append((now_ts, frame.copy()))
+                self._last_read_time = now_ts
                 self._frame_count += 1
                 if self._frame_count % 3 == 0:  # Use a lower divisor so it's easily coverable in tests
                     logger.debug(f"Heartbeat: ThreadedVideoReader has successfully processed {self._frame_count} frames.")
@@ -145,6 +157,61 @@ class ThreadedVideoReader:
             ret = self.ret
             self.ret = False  # Mark as consumed so subsequent reads return False until a new frame is retrieved
             return ret, self.frame
+
+    def get_buffered_frames(self, duration_sec: Optional[float] = None) -> List[Tuple[float, cv2.Mat]]:
+        """
+        Retrieves a thread-safe snapshot list of recently captured frames from the circular buffer.
+        """
+        with self.lock:
+            frames = list(self.frame_buffer)
+        if duration_sec is not None and duration_sec > 0 and len(frames) > 0:
+            cutoff = time.time() - duration_sec
+            frames = [f for f in frames if f[0] >= cutoff]
+        return frames
+
+    def save_diagnostic_clip(self, output_dir: str, prefix: str = "diag_clip", fps: int = 10, duration_sec: Optional[float] = None) -> Optional[str]:
+        """
+        Saves recent buffered frames to a diagnostic video clip (MP4).
+
+        Args:
+            output_dir: Directory path where the clip will be saved.
+            prefix: Filename prefix.
+            fps: Frame rate for the output video.
+            duration_sec: Number of recent seconds to include.
+
+        Returns:
+            The filepath of the saved video file, or None if no frames were available.
+        """
+        frames = self.get_buffered_frames(duration_sec=duration_sec)
+        if not frames:
+            return None
+
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            filename = f"{prefix}_{timestamp_str}.mp4"
+            filepath = os.path.join(output_dir, filename)
+
+            first_frame = frames[0][1]
+            h, w = first_frame.shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            writer = cv2.VideoWriter(filepath, fourcc, float(fps), (w, h))
+
+            if not writer.isOpened():
+                # Fallback to AVI / XVID if MP4 fourcc fails on some systems
+                filename = f"{prefix}_{timestamp_str}.avi"
+                filepath = os.path.join(output_dir, filename)
+                fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                writer = cv2.VideoWriter(filepath, fourcc, float(fps), (w, h))
+
+            for _, frame_img in frames:
+                writer.write(frame_img)
+            writer.release()
+            logger.info(f"Diagnostic video clip saved to: {filepath} ({len(frames)} frames)")
+            return filepath
+        except Exception:
+            logger.exception("Failed to write diagnostic video clip.")
+            return None
 
     def stop(self):
         """

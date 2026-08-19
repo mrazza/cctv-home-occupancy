@@ -111,3 +111,70 @@ def test_database_get_current_state_empty(temp_dir):
     assert state.is_someone_home is False
     assert state.current_occupancy == 0
     assert state.last_updated == ""
+
+def test_log_event_with_telemetry(db_manager):
+    """Ensures luminance and blur_metric telemetry are correctly recorded and retrieved."""
+    import numpy as np
+
+    eid = db_manager.log_event(
+        "ENTER",
+        tracker_id=10,
+        confidence=0.89,
+        session_id="session-abc",
+        luminance=np.float32(42.5),
+        blur_metric=np.float64(150.75)
+    )
+    assert eid > 0
+
+    events = db_manager.get_recent_events(limit=1)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.tracker_id == 10
+    assert abs(ev.luminance - 42.5) < 1e-4
+    assert abs(ev.blur_metric - 150.75) < 1e-4
+    assert isinstance(ev.luminance, float)
+    assert isinstance(ev.blur_metric, float)
+
+def test_database_schema_migration_legacy_db(temp_dir):
+    """Ensures that existing databases without luminance/blur_metric are automatically migrated."""
+    import os
+    import sqlite3
+    from src.database import DatabaseManager
+
+    legacy_db_path = os.path.join(temp_dir, "legacy_presence.db")
+    
+    # Create legacy table schema without luminance/blur_metric
+    conn = sqlite3.connect(legacy_db_path)
+    with conn:
+        conn.execute("""
+            CREATE TABLE presence_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                is_someone_home BOOLEAN NOT NULL DEFAULT 0,
+                current_occupancy INTEGER NOT NULL DEFAULT 0,
+                last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE events_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL CHECK(event_type IN ('ENTER', 'LEAVE', 'FORCE_RESET')),
+                tracker_id INTEGER,
+                confidence REAL,
+                timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                snapshot_path TEXT,
+                session_id TEXT
+            );
+        """)
+        conn.execute("INSERT INTO presence_state (id, is_someone_home, current_occupancy) VALUES (1, 0, 0);")
+        conn.commit()
+    conn.close()
+
+    # Now open with DatabaseManager (triggers init_db and migration)
+    db = DatabaseManager(legacy_db_path)
+    eid = db.log_event("ENTER", tracker_id=5, luminance=35.0, blur_metric=88.0)
+    assert eid > 0
+
+    events = db.get_recent_events(limit=1)
+    assert len(events) == 1
+    assert events[0].luminance == 35.0
+    assert events[0].blur_metric == 88.0

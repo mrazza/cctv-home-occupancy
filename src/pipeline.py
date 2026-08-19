@@ -9,6 +9,7 @@ from src.motion_detector import MotionDetector
 from src.object_tracker import ObjectTracker
 from src.database import DatabaseManager
 from src.video_reader import ThreadedVideoReader
+from src.preprocessing import compute_luminance, compute_blur_metric, enhance_low_light
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,10 @@ class PipelineOrchestrator:
             threshold=CONFIG.motion_threshold,
             min_contour_area=CONFIG.motion_min_contour_area,
             alpha=CONFIG.background_alpha,
-            roi=CONFIG.motion_roi
+            roi=CONFIG.motion_roi,
+            subtractor_type=CONFIG.motion_subtractor_type,
+            adaptive_threshold=CONFIG.motion_adaptive_threshold,
+            low_light_threshold=CONFIG.low_light_threshold
         )
         self.object_tracker = object_tracker or ObjectTracker(
             model_name=CONFIG.model_name,
@@ -101,7 +105,7 @@ class PipelineOrchestrator:
         # On-Demand event-driven settings
         self.active_until = 0.0
         self.lock = threading.Lock()
-        self.reader = None
+        self.reader: Optional[ThreadedVideoReader] = None
         self.rtsp_url = None
         
         OrchestratorRegistry.set_instance(self)
@@ -115,25 +119,43 @@ class PipelineOrchestrator:
 
     def process_single_frame(self, frame: cv2.Mat) -> List[CrossingEvent]:
         """
-        Processes a single frame through the pipeline and updates the database state accordingly.
+        Processes a single frame through the pipeline, records telemetry (luminance, blur),
+        applies low-light enhancement if configured, and updates the database state accordingly.
         Returns crossing events captured in this frame.
         """
         try:
+            # Calculate frame quality and illumination telemetry
+            luminance = compute_luminance(frame)
+            blur_metric = compute_blur_metric(frame)
+            is_low_light = (luminance < CONFIG.low_light_threshold)
+
+            # Apply low-light pre-processing enhancement if enabled and illumination is low
+            if CONFIG.low_light_enhancement and is_low_light:
+                processing_frame = enhance_low_light(
+                    frame,
+                    method=CONFIG.low_light_method,
+                    clip_limit=CONFIG.clahe_clip_limit,
+                    grid_size=CONFIG.clahe_grid_size,
+                    gamma=CONFIG.gamma_value
+                )
+            else:
+                processing_frame = frame
+
             # Always run motion detection to keep background model updated
-            motion_detected = self.motion_detector.detect(frame)
+            motion_detected = self.motion_detector.detect(processing_frame)
             
             events = []
             
             if self.state == "IDLE":
                 if motion_detected:
-                    logger.info("Motion detected! Pipeline transitioning from IDLE to ACTIVE. Triggering YOLO tracker.")
+                    logger.info(f"Motion detected! Pipeline transitioning from IDLE to ACTIVE (Luminance: {luminance:.1f}). Triggering YOLO tracker.")
                     self.state = "ACTIVE"
                     self.cooldown_counter = self.cooldown_frames
                     # Trigger YOLO tracker on this frame
-                    events = self.object_tracker.process_frame(frame)
+                    events = self.object_tracker.process_frame(processing_frame)
             elif self.state == "ACTIVE":
                 # Run YOLO Tracker
-                events = self.object_tracker.process_frame(frame)
+                events = self.object_tracker.process_frame(processing_frame)
                 
                 # Check if we should remain active
                 has_active_tracks = len(self.object_tracker.track_histories) > 0
@@ -153,15 +175,30 @@ class PipelineOrchestrator:
                         
             # Log detected events to database
             for event in events:
-                logger.info(f"Tripwire crossing event detected: {event.event_type} (Tracker ID: {event.tracker_id}, Confidence: {event.confidence:.2f})")
+                logger.info(
+                    f"Tripwire crossing event detected: {event.event_type} "
+                    f"(Tracker ID: {event.tracker_id}, Confidence: {event.confidence:.2f}, "
+                    f"Luminance: {luminance:.1f}, Blur: {blur_metric:.1f})"
+                )
                 event_id = self.db.log_event(
                     event_type=event.event_type,
                     tracker_id=event.tracker_id,
                     confidence=event.confidence,
                     snapshot_path=event.snapshot_path,
-                    session_id=self.object_tracker.session_id
+                    session_id=self.object_tracker.session_id,
+                    luminance=luminance,
+                    blur_metric=blur_metric
                 )
                 logger.info(f"Successfully logged crossing event to DB (Event ID: {event_id})")
+
+                # Diagnostic video clip capture
+                if CONFIG.diagnostic_clip_enabled and self.reader is not None:
+                    if not CONFIG.diagnostic_clip_low_light_only or is_low_light:
+                        threading.Thread(
+                            target=self._save_diagnostic_clip_thread,
+                            args=(f"{event.event_type.lower()}_id{event.tracker_id}",),
+                            daemon=True
+                        ).start()
                 
                 # Check if we should trigger webhooks
                 if CONFIG.webhook_urls:
@@ -173,6 +210,8 @@ class PipelineOrchestrator:
                             "tracker_id": event.tracker_id,
                             "confidence": event.confidence,
                             "snapshot_path": event.snapshot_path,
+                            "luminance": luminance,
+                            "blur_metric": blur_metric,
                             "is_someone_home": state.is_someone_home,
                             "current_occupancy": state.current_occupancy,
                             "timestamp": state.last_updated
@@ -185,6 +224,8 @@ class PipelineOrchestrator:
                             "tracker_id": event.tracker_id,
                             "confidence": event.confidence,
                             "snapshot_path": event.snapshot_path,
+                            "luminance": luminance,
+                            "blur_metric": blur_metric,
                             "is_someone_home": None,
                             "current_occupancy": None,
                             "timestamp": None
@@ -201,6 +242,19 @@ class PipelineOrchestrator:
         except Exception:
             logger.exception("Unexpected error occurred while processing a single frame in the pipeline.")
             return []
+
+    def _save_diagnostic_clip_thread(self, prefix: str):
+        """Asynchronously records a diagnostic video clip from buffered frames."""
+        try:
+            if self.reader is not None and hasattr(self.reader, 'save_diagnostic_clip'):
+                self.reader.save_diagnostic_clip(
+                    output_dir=CONFIG.diagnostic_clip_dir,
+                    prefix=prefix,
+                    fps=self.fps_limit,
+                    duration_sec=CONFIG.diagnostic_clip_duration
+                )
+        except Exception as e:
+            logger.warning(f"Failed to save diagnostic clip: {e}")
 
     def run_on_stream(self, rtsp_url: str):
         """Runs the monitoring pipeline continuously on an RTSP stream (Blocking)."""

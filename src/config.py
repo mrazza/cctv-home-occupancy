@@ -38,6 +38,22 @@ class CameraConfig(BaseModel):
         default=None,
         description="Region of interest for motion detection as [(x1, y1), (x2, y2)] normalized between 0.0 and 1.0. If None, the entire frame is used."
     )
+    motion_subtractor_type: str = Field(default="diff", description="Background subtraction algorithm: 'diff' or 'mog2'")
+    motion_adaptive_threshold: bool = Field(default=True, description="Dynamically scale differencing threshold in low light")
+
+    # Low-Light Pre-Processing Parameters
+    low_light_enhancement: bool = Field(default=False, description="Enable automatic low-light image enhancement")
+    low_light_threshold: float = Field(default=50.0, description="Luminance threshold (0-255) below which low-light mode activates")
+    low_light_method: str = Field(default="clahe", description="Low-light enhancement method: 'clahe', 'gamma', or 'both'")
+    clahe_clip_limit: float = Field(default=2.0, description="Contrast limit factor for CLAHE enhancement")
+    clahe_grid_size: int = Field(default=8, description="Tile grid size for CLAHE enhancement")
+    gamma_value: float = Field(default=1.5, description="Gamma correction factor (> 0.0) for gamma enhancement")
+
+    # Diagnostic Video Clip Settings
+    diagnostic_clip_enabled: bool = Field(default=False, description="Whether to save diagnostic video clips of crossing events")
+    diagnostic_clip_dir: str = Field(default="diagnostics/clips", description="Directory path where diagnostic video clips are stored")
+    diagnostic_clip_duration: int = Field(default=5, description="Duration in seconds for diagnostic video clips")
+    diagnostic_clip_low_light_only: bool = Field(default=True, description="Only record diagnostic video clips during low-light conditions")
 
     # Line Crossing Parameters (Slow Stage)
     # Tripwire Line: list of tuples [(x1, y1), (x2, y2)] representing the door threshold.
@@ -143,6 +159,18 @@ def load_config() -> CameraConfig:
         "CCTV_YOLO_IMGSZ": ("yolo_imgsz", _parse_yolo_imgsz),
         "CCTV_YOLO_DEVICE": ("yolo_device", lambda x: None if x.lower() in ("null", "none", "") else str(x)),
         "CCTV_ASPECT_RATIO_OVERRIDE": ("aspect_ratio_override", lambda x: None if x.lower() in ("null", "none", "") else float(x)),
+        "CCTV_MOTION_SUBTRACTOR_TYPE": ("motion_subtractor_type", str),
+        "CCTV_MOTION_ADAPTIVE_THRESHOLD": ("motion_adaptive_threshold", lambda x: str(x).lower() in ("true", "1", "yes")),
+        "CCTV_LOW_LIGHT_ENHANCEMENT": ("low_light_enhancement", lambda x: str(x).lower() in ("true", "1", "yes")),
+        "CCTV_LOW_LIGHT_THRESHOLD": ("low_light_threshold", float),
+        "CCTV_LOW_LIGHT_METHOD": ("low_light_method", str),
+        "CCTV_CLAHE_CLIP_LIMIT": ("clahe_clip_limit", float),
+        "CCTV_CLAHE_GRID_SIZE": ("clahe_grid_size", int),
+        "CCTV_GAMMA_VALUE": ("gamma_value", float),
+        "CCTV_DIAGNOSTIC_CLIP_ENABLED": ("diagnostic_clip_enabled", lambda x: str(x).lower() in ("true", "1", "yes")),
+        "CCTV_DIAGNOSTIC_CLIP_DIR": ("diagnostic_clip_dir", str),
+        "CCTV_DIAGNOSTIC_CLIP_DURATION": ("diagnostic_clip_duration", int),
+        "CCTV_DIAGNOSTIC_CLIP_LOW_LIGHT_ONLY": ("diagnostic_clip_low_light_only", lambda x: str(x).lower() in ("true", "1", "yes")),
     }
     
     # Handle CCTV_WEBHOOK_URLS env variable

@@ -1,14 +1,14 @@
 import os
 import sqlite3
 from datetime import datetime
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 from src.types import PresenceState, DatabaseEvent
 
 class DatabaseManager:
     def __init__(self, db_path: str):
         """
         Initializes the DatabaseManager, creating parent directories for the SQLite file if needed,
-        and triggers table initialization.
+        and triggers table initialization and schema migration.
         """
         self.db_path = db_path
         # Create parent directory if needed
@@ -31,7 +31,8 @@ class DatabaseManager:
     def init_db(self):
         """
         Initializes the database schema by creating presence_state and events_log tables.
-        Also inserts initial default state row if not already present.
+        Also inserts initial default state row if not already present, and applies automatic
+        schema migrations for optional telemetry columns (luminance, blur_metric).
         """
         conn = self.get_connection()
         try:
@@ -61,9 +62,20 @@ class DatabaseManager:
                         confidence REAL,
                         timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         snapshot_path TEXT,
-                        session_id TEXT
+                        session_id TEXT,
+                        luminance REAL,
+                        blur_metric REAL
                     );
                 """)
+
+                # Schema migration check: ensure newly added columns exist in older database files
+                cur = conn.execute("PRAGMA table_info(events_log);")
+                existing_cols = {row["name"] for row in cur.fetchall()}
+                if "luminance" not in existing_cols:
+                    conn.execute("ALTER TABLE events_log ADD COLUMN luminance REAL;")
+                if "blur_metric" not in existing_cols:
+                    conn.execute("ALTER TABLE events_log ADD COLUMN blur_metric REAL;")
+
                 conn.commit()
         finally:
             conn.close()
@@ -93,7 +105,8 @@ class DatabaseManager:
 
     def log_event(self, event_type: str, tracker_id: Optional[int] = None, 
                   confidence: Optional[float] = None, snapshot_path: Optional[str] = None,
-                  session_id: Optional[str] = None) -> int:
+                  session_id: Optional[str] = None, luminance: Optional[float] = None,
+                  blur_metric: Optional[float] = None) -> int:
         """
         Logs an ENTER or LEAVE event to the database and atomically updates occupancy and presence status.
         Handles safe type casting of numpy values (int, float) before writing to the database.
@@ -104,6 +117,8 @@ class DatabaseManager:
             confidence: Optional confidence of the detection.
             snapshot_path: Optional file path to the saved crop snapshot.
             session_id: Optional UUID identifying the active tracker session.
+            luminance: Optional average frame luminance at the time of the event.
+            blur_metric: Optional Laplacian blur variance at the time of the event.
 
         Returns:
             The row ID of the inserted event log record.
@@ -113,6 +128,10 @@ class DatabaseManager:
             tracker_id = int(tracker_id)
         if confidence is not None:
             confidence = float(confidence)
+        if luminance is not None:
+            luminance = float(luminance)
+        if blur_metric is not None:
+            blur_metric = float(blur_metric)
             
         conn = self.get_connection()
         try:
@@ -128,9 +147,9 @@ class DatabaseManager:
                     
                 # Log the event
                 cursor = conn.execute("""
-                    INSERT INTO events_log (event_type, tracker_id, confidence, timestamp, snapshot_path, session_id)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (event_type, tracker_id, confidence, now, snapshot_path, session_id))
+                    INSERT INTO events_log (event_type, tracker_id, confidence, timestamp, snapshot_path, session_id, luminance, blur_metric)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (event_type, tracker_id, confidence, now, snapshot_path, session_id, luminance, blur_metric))
                 event_id = cursor.lastrowid
                 
                 # Update state atomically using SQLite MAX and CASE to avoid check-then-act race conditions
@@ -175,7 +194,7 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def get_recent_events(self, limit: int = 10) -> list[DatabaseEvent]:
+    def get_recent_events(self, limit: int = 10) -> List[DatabaseEvent]:
         """
         Retrieves a list of recent database event log entries, sorted newest first.
 
@@ -188,7 +207,7 @@ class DatabaseManager:
         conn = self.get_connection()
         try:
             cursor = conn.execute("""
-                SELECT id, event_type, tracker_id, confidence, timestamp, snapshot_path, session_id
+                SELECT id, event_type, tracker_id, confidence, timestamp, snapshot_path, session_id, luminance, blur_metric
                 FROM events_log
                 ORDER BY timestamp DESC, id DESC
                 LIMIT ?
@@ -202,7 +221,9 @@ class DatabaseManager:
                     confidence=row["confidence"],
                     timestamp=row["timestamp"],
                     snapshot_path=row["snapshot_path"],
-                    session_id=row["session_id"]
+                    session_id=row["session_id"],
+                    luminance=row["luminance"],
+                    blur_metric=row["blur_metric"]
                 )
                 for row in rows
             ]
