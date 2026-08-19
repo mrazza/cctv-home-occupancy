@@ -25,3 +25,5 @@ class DatabaseEvent:
     timestamp: str
     snapshot_path: Optional[str]
     session_id: Optional[str] = None
+    luminance: Optional[float] = None
+    blur_metric: Optional[float] = None

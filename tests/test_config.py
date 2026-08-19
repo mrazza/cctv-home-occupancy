@@ -251,3 +251,33 @@ def test_load_config_yolo_imgsz_env_variations(monkeypatch):
     assert config.yolo_imgsz == 640
 
 
+
+def test_load_config_low_light_and_diagnostics_env(monkeypatch):
+    """Verifies low-light pre-processing and diagnostic clip settings map from environment."""
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent_file.json")
+    monkeypatch.setenv("CCTV_LOW_LIGHT_ENHANCEMENT", "true")
+    monkeypatch.setenv("CCTV_LOW_LIGHT_THRESHOLD", "65.0")
+    monkeypatch.setenv("CCTV_LOW_LIGHT_METHOD", "gamma")
+    monkeypatch.setenv("CCTV_CLAHE_CLIP_LIMIT", "3.0")
+    monkeypatch.setenv("CCTV_CLAHE_GRID_SIZE", "16")
+    monkeypatch.setenv("CCTV_GAMMA_VALUE", "1.8")
+    monkeypatch.setenv("CCTV_MOTION_SUBTRACTOR_TYPE", "mog2")
+    monkeypatch.setenv("CCTV_MOTION_ADAPTIVE_THRESHOLD", "false")
+    monkeypatch.setenv("CCTV_DIAGNOSTIC_CLIP_ENABLED", "true")
+    monkeypatch.setenv("CCTV_DIAGNOSTIC_CLIP_DIR", "custom/clips")
+    monkeypatch.setenv("CCTV_DIAGNOSTIC_CLIP_DURATION", "10")
+    monkeypatch.setenv("CCTV_DIAGNOSTIC_CLIP_LOW_LIGHT_ONLY", "false")
+
+    config = load_config()
+    assert config.low_light_enhancement is True
+    assert config.low_light_threshold == 65.0
+    assert config.low_light_method == "gamma"
+    assert config.clahe_clip_limit == 3.0
+    assert config.clahe_grid_size == 16
+    assert config.gamma_value == 1.8
+    assert config.motion_subtractor_type == "mog2"
+    assert config.motion_adaptive_threshold is False
+    assert config.diagnostic_clip_enabled is True
+    assert config.diagnostic_clip_dir == "custom/clips"
+    assert config.diagnostic_clip_duration == 10
+    assert config.diagnostic_clip_low_light_only is False

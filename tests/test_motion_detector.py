@@ -104,3 +104,46 @@ def test_motion_detector_invalid_roi():
     frame_motion = np.zeros((100, 100, 3), dtype=np.uint8)
     frame_motion[45:55, 45:55, :] = 255
     assert detector.detect(frame_motion) is True
+
+def test_motion_detector_mog2_subtractor():
+    """Verifies MOG2 background subtractor detects moving foreground."""
+    detector = MotionDetector(threshold=0.01, min_contour_area=10, subtractor_type="mog2")
+    
+    # Train background with black frames
+    frame_black = np.zeros((100, 100, 3), dtype=np.uint8)
+    for _ in range(5):
+        detector.detect(frame_black)
+        
+    # Introduce motion
+    frame_motion = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame_motion[20:80, 20:80, :] = 255
+    assert detector.detect(frame_motion) is True
+
+    # Reset
+    detector.reset()
+    assert detector._mog2 is not None
+
+def test_motion_detector_adaptive_low_light():
+    """Verifies that in low-light conditions, adaptive thresholding detects subtle movement."""
+    # In dark image (mean intensity 20, below low_light_threshold=50),
+    # a subtle intensity change of +15 (from 20 to 35) should trigger under adaptive mode.
+    detector_adaptive = MotionDetector(
+        threshold=0.01,
+        min_contour_area=50,
+        adaptive_threshold=True,
+        low_light_threshold=50.0
+    )
+    
+    dark_bg = np.ones((100, 100, 3), dtype=np.uint8) * 20
+    detector_adaptive.detect(dark_bg)
+    
+    # Motion with subtle change (+15 intensity delta, 30x30 patch)
+    dark_motion = np.ones((100, 100, 3), dtype=np.uint8) * 20
+    dark_motion[35:65, 35:65, :] = 35
+    
+    assert detector_adaptive.detect(dark_motion) is True
+
+def test_motion_detector_empty_frame():
+    detector = MotionDetector()
+    assert detector.detect(None) is False
+    assert detector.detect(np.array([])) is False

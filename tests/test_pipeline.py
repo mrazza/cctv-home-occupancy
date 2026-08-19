@@ -1,3 +1,4 @@
+import os
 import time
 import numpy as np
 from unittest.mock import MagicMock, patch
@@ -645,3 +646,93 @@ def test_threaded_video_reader_aspect_ratio_correction(monkeypatch):
 
 
 
+
+def test_threaded_video_reader_buffer_and_save_clip(temp_dir):
+    """Verifies rolling frame buffer and diagnostic clip saving functionality."""
+    with patch('src.video_reader.cv2.VideoCapture') as mock_vc_class:
+        mock_cap = MagicMock()
+        mock_vc_class.return_value = mock_cap
+        mock_cap.isOpened.return_value = True
+
+        reader = ThreadedVideoReader("rtsp://test-url", rolling_buffer_seconds=5.0, fps_estimate=10)
+        
+        # Test empty buffer returns None for clip
+        assert reader.save_diagnostic_clip(output_dir=temp_dir) is None
+
+        # Manually push frames into buffer
+        dummy_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        now = time.time()
+        for i in range(15):
+            reader.frame_buffer.append((now - (14 - i) * 0.1, dummy_frame.copy()))
+
+        buffered = reader.get_buffered_frames(duration_sec=1.0)
+        assert len(buffered) > 0
+
+        clip_path = reader.save_diagnostic_clip(output_dir=temp_dir, prefix="test_clip", fps=10, duration_sec=2.0)
+        assert clip_path is not None
+        assert os.path.exists(clip_path)
+        assert clip_path.startswith(temp_dir)
+
+def test_pipeline_low_light_enhancement_applied(db_manager, monkeypatch):
+    """Verifies that when low_light_enhancement is enabled and frame is dark, enhanced frame is processed."""
+    from src.config import CONFIG
+    monkeypatch.setattr(CONFIG, "low_light_enhancement", True)
+    monkeypatch.setattr(CONFIG, "low_light_threshold", 100.0)
+    monkeypatch.setattr(CONFIG, "low_light_method", "gamma")
+    monkeypatch.setattr(CONFIG, "gamma_value", 2.0)
+
+    mock_md = MagicMock(spec=MotionDetector)
+    mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.session_id = "test-session-123"
+    mock_ot.track_histories = {}
+    mock_ot.process_frame.return_value = []
+
+    orchestrator = PipelineOrchestrator(
+        db_manager=db_manager,
+        motion_detector=mock_md,
+        object_tracker=mock_ot
+    )
+
+    # Frame with dark intensity (30)
+    dark_frame = np.ones((50, 50, 3), dtype=np.uint8) * 30
+    orchestrator.process_single_frame(dark_frame)
+
+    # Verify that mock_md.detect was called with enhanced frame (higher mean than original 30)
+    called_frame = mock_md.detect.call_args[0][0]
+    assert np.mean(called_frame) > 30.0
+
+def test_pipeline_diagnostic_clip_triggered(db_manager, monkeypatch, temp_dir):
+    """Verifies diagnostic video clip saving is triggered on event when enabled."""
+    from src.config import CONFIG
+    monkeypatch.setattr(CONFIG, "diagnostic_clip_enabled", True)
+    monkeypatch.setattr(CONFIG, "diagnostic_clip_dir", temp_dir)
+    monkeypatch.setattr(CONFIG, "diagnostic_clip_low_light_only", False)
+
+    mock_md = MagicMock(spec=MotionDetector)
+    mock_md.detect.return_value = True
+
+    mock_ot = MagicMock(spec=ObjectTracker)
+    mock_ot.session_id = "test-session-123"
+    mock_ot.track_histories = {}
+    mock_ot.process_frame.return_value = [CrossingEvent(
+        event_type="ENTER",
+        tracker_id=7,
+        confidence=0.91,
+        snapshot_path="snapshots/clip_test.jpg"
+    )]
+
+    orchestrator = PipelineOrchestrator(
+        db_manager=db_manager,
+        motion_detector=mock_md,
+        object_tracker=mock_ot
+    )
+
+    # Create mock reader with save_diagnostic_clip
+    mock_reader = MagicMock()
+    orchestrator.reader = mock_reader
+
+    frame = np.ones((50, 50, 3), dtype=np.uint8) * 50
+    orchestrator.process_single_frame(frame)
+    time.sleep(0.1)
+
+    assert mock_reader.save_diagnostic_clip.called is True

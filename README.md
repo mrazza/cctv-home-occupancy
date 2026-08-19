@@ -129,6 +129,28 @@ The system is highly configurable. You can specify settings via a JSON configura
 | `background_alpha` | `CCTV_BACKGROUND_ALPHA` | `0.05` | Accumulator update speed (alpha) for background subtraction. |
 | `motion_cooldown_frames` | `CCTV_MOTION_COOLDOWN` | `150` | Number of idle frames before returning to the fast motion detection stage. |
 | `motion_roi` | `CCTV_MOTION_ROI` | `null` | Region of interest for motion detection. Array of normalized coordinates, e.g. `[[x1,y1],[x2,y2],...]`. If `null`, uses full frame. |
+| `motion_subtractor_type` | `CCTV_MOTION_SUBTRACTOR_TYPE` | `diff` | Background subtraction method: `'diff'` (running average) or `'mog2'` (Gaussian Mixture Model). |
+| `motion_adaptive_threshold` | `CCTV_MOTION_ADAPTIVE_THRESHOLD` | `true` | Dynamically scale pixel differencing threshold and min contour area in low-light conditions. |
+
+#### 🌙 Low-Light Pre-Processing & Telemetry Settings
+
+| JSON Key | Env Variable | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `low_light_enhancement` | `CCTV_LOW_LIGHT_ENHANCEMENT` | `false` | Enable automatic low-light image enhancement when average frame luminance is below threshold. |
+| `low_light_threshold` | `CCTV_LOW_LIGHT_THRESHOLD` | `50.0` | Frame luminance threshold (0.0 to 255.0) below which low-light mode and sensitivity scaling activate. |
+| `low_light_method` | `CCTV_LOW_LIGHT_METHOD` | `clahe` | Low-light enhancement algorithm: `'clahe'`, `'gamma'`, or `'both'`. |
+| `clahe_clip_limit` | `CCTV_CLAHE_CLIP_LIMIT` | `2.0` | Contrast limit factor for CLAHE enhancement. |
+| `clahe_grid_size` | `CCTV_CLAHE_GRID_SIZE` | `8` | Tile grid size ($N 	imes N$) for CLAHE histogram equalization. |
+| `gamma_value` | `CCTV_GAMMA_VALUE` | `1.5` | Gamma factor ($> 0$) when gamma correction is active. |
+
+#### 📼 Diagnostic Video Clip Recording Settings
+
+| JSON Key | Env Variable | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `diagnostic_clip_enabled` | `CCTV_DIAGNOSTIC_CLIP_ENABLED` | `false` | Whether to save short diagnostic video clips of detected crossing events. |
+| `diagnostic_clip_dir` | `CCTV_DIAGNOSTIC_CLIP_DIR` | `diagnostics/clips` | Directory path where diagnostic video clips are stored. |
+| `diagnostic_clip_duration` | `CCTV_DIAGNOSTIC_CLIP_DURATION` | `5` | Duration in seconds of saved diagnostic video clips. |
+| `diagnostic_clip_low_light_only` | `CCTV_DIAGNOSTIC_CLIP_LOW_LIGHT_ONLY` | `true` | Only record diagnostic video clips when ambient frame luminance $< 	ext{threshold}$. |
 
 #### 📐 Tripwire & Line-Crossing Settings
 
