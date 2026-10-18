@@ -108,6 +108,11 @@ class MotionDetector:
         if self.subtractor_type == "mog2":
             if self._mog2 is None:
                 self._mog2 = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=16, detectShadows=False)
+            if self.adaptive_threshold and lum < self.low_light_threshold and self.low_light_threshold > 0:
+                scale_ratio = max(0.48, lum / self.low_light_threshold)
+                self._mog2.setVarThreshold(max(8.0, 16.0 * scale_ratio))
+            else:
+                self._mog2.setVarThreshold(16.0)
             fg_mask = self._mog2.apply(blurred)
             thresh = cv2.threshold(fg_mask, 127, 255, cv2.THRESH_BINARY)[1]
             dilated = cv2.dilate(thresh, None, iterations=2)

@@ -281,3 +281,35 @@ def test_load_config_low_light_and_diagnostics_env(monkeypatch):
     assert config.diagnostic_clip_dir == "custom/clips"
     assert config.diagnostic_clip_duration == 10
     assert config.diagnostic_clip_low_light_only is False
+
+
+def test_load_config_conf_alias(monkeypatch, tmp_path):
+    """Verifies that 'conf' in config.json is correctly aliased to tracker_confidence."""
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"conf": 0.05, "model_name": "yolo11n.pt"}))
+    monkeypatch.setenv("CCTV_CONFIG_PATH", str(config_file))
+    
+    cfg = load_config()
+    assert cfg.tracker_confidence == 0.05
+    assert cfg.model_name == "yolo11n.pt"
+
+
+def test_load_config_phase2_env_vars(monkeypatch):
+    """Verifies that Phase 2 tracking and pre-filtering parameters map from environment variables."""
+    monkeypatch.setenv("CCTV_CONFIG_PATH", "non_existent.json")
+    monkeypatch.setenv("CCTV_CONF", "0.08")
+    monkeypatch.setenv("CCTV_TRACKER_POINT", "bottom_center")
+    monkeypatch.setenv("CCTV_TRACK_STITCHING", "true")
+    monkeypatch.setenv("CCTV_TRACK_STITCHING_MAX_FRAMES", "45")
+    monkeypatch.setenv("CCTV_TRACK_STITCHING_MAX_DIST", "150.0")
+    monkeypatch.setenv("CCTV_LOW_LIGHT_DENOISE_PREFILTER", "false")
+    monkeypatch.setenv("CCTV_OCCUPANCY_IMPUTE_MISSING_ARRIVALS", "true")
+    
+    cfg = load_config()
+    assert cfg.tracker_confidence == 0.08
+    assert cfg.tracker_point == "bottom_center"
+    assert cfg.track_stitching is True
+    assert cfg.track_stitching_max_frames == 45
+    assert cfg.track_stitching_max_dist == 150.0
+    assert cfg.low_light_denoise_prefilter is False
+    assert cfg.occupancy_impute_missing_arrivals is True

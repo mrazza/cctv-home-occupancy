@@ -399,3 +399,19 @@ def test_api_trigger_motion_endpoint_success():
     finally:
         CONFIG.trigger_mode = original_mode
 
+
+
+def test_get_clip_endpoint(tmp_path, monkeypatch):
+    from src.config import CONFIG
+    clip_dir = tmp_path / "clips"
+    clip_dir.mkdir(parents=True, exist_ok=True)
+    test_clip = clip_dir / "diag_test_clip.mp4"
+    test_clip.write_bytes(b"fake mp4 content")
+    monkeypatch.setattr(CONFIG, "diagnostic_clip_dir", str(clip_dir))
+    
+    response = client.get("/clip/diag_test_clip.mp4")
+    assert response.status_code == 200
+    assert response.content == b"fake mp4 content"
+
+    response_404 = client.get("/clip/non_existent.mp4")
+    assert response_404.status_code == 404

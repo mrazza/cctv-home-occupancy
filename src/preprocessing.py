@@ -34,7 +34,7 @@ def compute_blur_metric(frame: np.ndarray) -> float:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
-def apply_clahe(frame: np.ndarray, clip_limit: float = 2.0, grid_size: int = 8) -> np.ndarray:
+def apply_clahe(frame: np.ndarray, clip_limit: float = 2.0, grid_size: int = 8, denoise_prefilter: bool = True) -> np.ndarray:
     """
     Applies Contrast Limited Adaptive Histogram Equalization (CLAHE) on the L channel of LAB color space.
     Enhances local contrast while avoiding amplification of high-frequency noise.
@@ -43,6 +43,8 @@ def apply_clahe(frame: np.ndarray, clip_limit: float = 2.0, grid_size: int = 8) 
         frame: BGR image frame.
         clip_limit: Threshold for contrast limiting.
         grid_size: Size of the grid for histogram equalization (e.g. 8 for 8x8 tiles).
+        denoise_prefilter: If True, applies lightweight 3x3 Gaussian pre-filtering on the L channel
+            to prevent amplification of camera sensor shot noise on monochrome/IR night frames.
 
     Returns:
         Enhanced BGR image frame.
@@ -51,6 +53,8 @@ def apply_clahe(frame: np.ndarray, clip_limit: float = 2.0, grid_size: int = 8) 
         return frame
     lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
     l_channel, a_channel, b_channel = cv2.split(lab)
+    if denoise_prefilter:
+        l_channel = cv2.GaussianBlur(l_channel, (3, 3), 0)
     clahe = cv2.createCLAHE(clipLimit=float(clip_limit), tileGridSize=(int(grid_size), int(grid_size)))
     cl = clahe.apply(l_channel)
     merged = cv2.merge((cl, a_channel, b_channel))
@@ -79,7 +83,8 @@ def enhance_low_light(
     method: str = 'clahe',
     clip_limit: float = 2.0,
     grid_size: int = 8,
-    gamma: float = 1.5
+    gamma: float = 1.5,
+    denoise_prefilter: bool = True
 ) -> np.ndarray:
     """
     Enhances low-light image frame using the specified method.
@@ -98,10 +103,10 @@ def enhance_low_light(
         return frame
     m = method.lower().strip()
     if m == 'clahe':
-        return apply_clahe(frame, clip_limit=clip_limit, grid_size=grid_size)
+        return apply_clahe(frame, clip_limit=clip_limit, grid_size=grid_size, denoise_prefilter=denoise_prefilter)
     elif m == 'gamma':
         return apply_gamma(frame, gamma=gamma)
     elif m == 'both':
         g_frame = apply_gamma(frame, gamma=gamma)
-        return apply_clahe(g_frame, clip_limit=clip_limit, grid_size=grid_size)
+        return apply_clahe(g_frame, clip_limit=clip_limit, grid_size=grid_size, denoise_prefilter=denoise_prefilter)
     return frame

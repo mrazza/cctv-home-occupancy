@@ -72,3 +72,30 @@ def test_draw_hud_sidebar_resolutions():
         source_name="rtsp://test_stream_low_res"
     )
     assert not np.all(frame_compact == 0)
+
+from src.visualization import draw_zonal_tripwire, draw_tracked_person
+import numpy as np
+
+def test_draw_zonal_tripwire():
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    pt_A = (10, 50)
+    pt_B = (90, 50)
+    res = draw_zonal_tripwire(frame, pt_A, pt_B, dead_zone_half_px=10.0)
+    assert res is not None
+    assert not np.all(res == 0)
+
+
+def test_draw_tracked_person_bottom_center():
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    bbox = (20, 20, 60, 80)
+    res = draw_tracked_person(frame, bbox, tracker_id=5, tracker_point="bottom_center", zone_label="INSIDE", conf=0.88)
+    assert res is not None
+    assert not np.all(res == 0)
+
+
+def test_draw_tracked_person_centroid():
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    bbox = (20, 20, 60, 80)
+    res = draw_tracked_person(frame, bbox, tracker_id=5, tracker_point="centroid", zone_label="OUTSIDE", conf=0.75)
+    assert res is not None
+    assert not np.all(res == 0)

@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Any
 from src.config import CONFIG
 from src.database import DatabaseManager
 from src.pipeline import FrameRegistry
-from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines
+from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines, draw_zonal_tripwire, draw_tracked_person
 
 app = FastAPI(
     title="House Presence Monitoring API",
@@ -25,6 +25,11 @@ db_manager = DatabaseManager(CONFIG.db_path)
 os.makedirs(CONFIG.snapshot_dir, exist_ok=True)
 # Mount snapshots as static files so they can be retrieved over HTTP/HTTPS by Mattermost
 app.mount("/snapshots", StaticFiles(directory=CONFIG.snapshot_dir), name="snapshots")
+
+# Mount diagnostic clips directory if enabled
+if CONFIG.diagnostic_clip_enabled:
+    os.makedirs(CONFIG.diagnostic_clip_dir, exist_ok=True)
+    app.mount("/clips", StaticFiles(directory=CONFIG.diagnostic_clip_dir), name="clips")
 
 
 class StatusResponse(BaseModel):
@@ -115,6 +120,15 @@ def get_snapshot(filename: str):
     return FileResponse(filepath)
 
 
+@app.get("/clip/{filename}", tags=["Diagnostics"])
+def get_clip(filename: str):
+    """Serves a captured diagnostic video clip directly."""
+    filepath = os.path.join(CONFIG.diagnostic_clip_dir, filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Clip not found")
+    return FileResponse(filepath)
+
+
 @app.get("/frame", tags=["Stream"])
 def get_current_frame(
     draw_tripwire: bool = Query(default=False, description="Draw the tripwire line and inside direction vector on the frame"),
@@ -148,40 +162,15 @@ def get_current_frame(
         if not ret or frame is None:
             raise HTTPException(status_code=503, detail="Failed to retrieve frame from camera stream.")
 
-    # 3. Optional: Draw Tripwire Overlay
+    # 3. Optional: Draw Tripwire & Zonal State Machine Overlay
     if draw_tripwire:
         h, w, _ = frame.shape
         tx1, ty1 = int(CONFIG.tripwire_line[0][0] * w), int(CONFIG.tripwire_line[0][1] * h)
         tx2, ty2 = int(CONFIG.tripwire_line[1][0] * w), int(CONFIG.tripwire_line[1][1] * h)
         pt_A = (tx1, ty1)
         pt_B = (tx2, ty2)
-        
-        # Draw tripwire line
-        cv2.line(frame, pt_A, pt_B, (255, 0, 0), 3, cv2.LINE_AA)
-        cv2.circle(frame, pt_A, 6, (0, 0, 255), -1)
-        cv2.circle(frame, pt_B, 6, (255, 0, 0), -1)
-        
-        # Draw inside vector arrow
-        mid, arrow_dest = calculate_arrow_endpoint(pt_A, pt_B)
-        cv2.arrowedLine(frame, mid, arrow_dest, (0, 255, 0), 3, tipLength=0.3, line_type=cv2.LINE_AA)
-        cv2.putText(frame, "INSIDE / ENTER", (arrow_dest[0] + 10, arrow_dest[1] + 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
-        
-        # Draw dead zone boundaries if configured
-        dead_zone_width = CONFIG.tripwire_dead_zone_width
-        if dead_zone_width > 0:
-            dead_zone_half_px = (dead_zone_width * h) / 2.0
-            (ins_A, ins_B), (out_A, out_B) = compute_dead_zone_lines(pt_A, pt_B, dead_zone_half_px)
-            
-            # Semi-transparent dead zone fill
-            overlay = frame.copy()
-            zone_polygon = np.array([ins_A, ins_B, out_B, out_A], dtype=np.int32)
-            cv2.fillPoly(overlay, [zone_polygon], (0, 255, 255))  # Yellow fill
-            cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
-            
-            # Boundary lines (solid thin cyan/yellow lines)
-            cv2.line(frame, ins_A, ins_B, (255, 255, 0), 1, cv2.LINE_AA)
-            cv2.line(frame, out_A, out_B, (255, 255, 0), 1, cv2.LINE_AA)
+        dead_zone_half_px = (CONFIG.tripwire_dead_zone_width * h) / 2.0
+        draw_zonal_tripwire(frame, pt_A, pt_B, dead_zone_half_px)
 
     # 3b. Optional: Draw ROI Overlay
     if draw_roi and CONFIG.motion_roi is not None and len(CONFIG.motion_roi) >= 2:

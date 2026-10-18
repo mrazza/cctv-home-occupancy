@@ -6,7 +6,7 @@
     "yolo_imgsz": 640,
     "yolo_device": null,
     "tracker_confidence": 0.1,
-    "track_buffer": 30,
+    "track_buffer": 60,
     "host": "0.0.0.0",
     "port": 8000,
     "log_level": "INFO",
@@ -19,13 +19,34 @@
     "motion_cooldown_frames": 150,
     "motion_roi": null,
     "tripwire_line": [
-        [0.2, 0.5],
-        [0.8, 0.5]
+        [
+            0.2,
+            0.5
+        ],
+        [
+            0.8,
+            0.5
+        ]
     ],
     "tripwire_dead_zone_width": 0.05,
     "tripwire_strict_segment": false,
     "db_path": "db/presence.db",
     "snapshot_dir": "snapshots",
     "webhook_urls": [],
-    "webhook_timeout": 5
+    "webhook_timeout": 5,
+    "tracker_point": "bottom_center",
+    "track_stitching": true,
+    "track_stitching_max_frames": 30,
+    "track_stitching_max_dist": 120.0,
+    "low_light_enhancement": true,
+    "low_light_threshold": 50.0,
+    "low_light_method": "clahe",
+    "clahe_clip_limit": 1.2,
+    "clahe_grid_size": 8,
+    "gamma_value": 1.5,
+    "low_light_denoise_prefilter": true,
+    "diagnostic_clip_enabled": false,
+    "diagnostic_clip_dir": "diagnostics/clips",
+    "diagnostic_clip_duration": 5,
+    "diagnostic_clip_low_light_only": true
 }

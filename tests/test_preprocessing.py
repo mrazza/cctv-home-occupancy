@@ -89,3 +89,17 @@ def test_enhance_low_light():
 
     # Empty frame
     assert enhance_low_light(None) is None
+
+
+def test_apply_clahe_denoise_prefilter():
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame[30:70, 30:70] = 50
+    # Add salt-and-pepper noise
+    frame[20, 20] = 255
+    frame[80, 80] = 255
+    res_filtered = apply_clahe(frame, clip_limit=1.2, denoise_prefilter=True)
+    res_raw = apply_clahe(frame, clip_limit=1.2, denoise_prefilter=False)
+    assert res_filtered is not None
+    assert res_raw is not None
+    # Both produce non-zero valid images
+    assert np.mean(res_filtered) > 0
