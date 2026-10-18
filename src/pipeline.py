@@ -1,3 +1,4 @@
+import os
 import cv2
 import time
 import threading
@@ -199,9 +200,15 @@ class PipelineOrchestrator:
                 # Diagnostic video clip capture
                 if CONFIG.diagnostic_clip_enabled and self.reader is not None:
                     if not CONFIG.diagnostic_clip_low_light_only or is_low_light:
+                        ts_str = None
+                        if event.snapshot_path:
+                            base = os.path.splitext(os.path.basename(event.snapshot_path))[0]
+                            parts = base.split("_", 2)
+                            if len(parts) >= 3:
+                                ts_str = parts[2]
                         threading.Thread(
                             target=self._save_diagnostic_clip_thread,
-                            args=(f"{event.event_type.lower()}_id{event.tracker_id}",),
+                            args=(f"{event.event_type.lower()}_id{event.tracker_id}", ts_str),
                             daemon=True
                         ).start()
                 
@@ -248,7 +255,7 @@ class PipelineOrchestrator:
             logger.exception("Unexpected error occurred while processing a single frame in the pipeline.")
             return []
 
-    def _save_diagnostic_clip_thread(self, prefix: str):
+    def _save_diagnostic_clip_thread(self, prefix: str, timestamp_str: Optional[str] = None):
         """Asynchronously records a diagnostic video clip from buffered frames."""
         try:
             if self.reader is not None and hasattr(self.reader, 'save_diagnostic_clip'):
@@ -256,7 +263,8 @@ class PipelineOrchestrator:
                     output_dir=CONFIG.diagnostic_clip_dir,
                     prefix=prefix,
                     fps=self.fps_limit,
-                    duration_sec=CONFIG.diagnostic_clip_duration
+                    duration_sec=CONFIG.diagnostic_clip_duration,
+                    timestamp_str=timestamp_str
                 )
         except Exception as e:
             logger.warning(f"Failed to save diagnostic clip: {e}")

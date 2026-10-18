@@ -169,7 +169,7 @@ class ThreadedVideoReader:
             frames = [f for f in frames if f[0] >= cutoff]
         return frames
 
-    def save_diagnostic_clip(self, output_dir: str, prefix: str = "diag_clip", fps: int = 10, duration_sec: Optional[float] = None) -> Optional[str]:
+    def save_diagnostic_clip(self, output_dir: str, prefix: str = "diag_clip", fps: int = 10, duration_sec: Optional[float] = None, timestamp_str: Optional[str] = None) -> Optional[str]:
         """
         Saves recent buffered frames to a diagnostic video clip (MP4).
 
@@ -188,7 +188,8 @@ class ThreadedVideoReader:
 
         try:
             os.makedirs(output_dir, exist_ok=True)
-            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            if timestamp_str is None:
+                timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             filename = f"{prefix}_{timestamp_str}.mp4"
             filepath = os.path.join(output_dir, filename)
 
@@ -207,6 +208,23 @@ class ThreadedVideoReader:
             for _, frame_img in frames:
                 writer.write(frame_img)
             writer.release()
+
+            # Convert to web-streamable H.264 if ffmpeg is available
+            try:
+                import subprocess
+                h264_tmp = filepath + ".h264.mp4"
+                cmd = [
+                    "ffmpeg", "-y", "-i", filepath,
+                    "-c:v", "libx264", "-preset", "ultrafast",
+                    "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                    h264_tmp
+                ]
+                res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if res.returncode == 0 and os.path.exists(h264_tmp):
+                    os.replace(h264_tmp, filepath)
+            except Exception:
+                pass
+
             logger.info(f"Diagnostic video clip saved to: {filepath} ({len(frames)} frames)")
             return filepath
         except Exception:
