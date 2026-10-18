@@ -122,11 +122,60 @@ def get_snapshot(filename: str):
 
 @app.get("/clip/{filename}", tags=["Diagnostics"])
 def get_clip(filename: str):
-    """Serves a captured diagnostic video clip directly."""
+    """
+    Serves a captured diagnostic video clip directly.
+    Supports prefix matching to resolve microsecond drift and on-demand
+    H.264 web transcoding for HTML5 video element compatibility.
+    """
+    import glob
+    import subprocess
+
+    # 1. Resolve file path (exact or prefix match to resolve microsecond drift)
     filepath = os.path.join(CONFIG.diagnostic_clip_dir, filename)
     if not os.path.exists(filepath):
-        raise HTTPException(status_code=404, detail="Clip not found")
-    return FileResponse(filepath)
+        base, ext = os.path.splitext(filename)
+        # Match by prefix without microsecond suffix (e.g. 'leave_id105576_20261017_175906')
+        prefix = base.rsplit("_", 1)[0]
+        matches = glob.glob(os.path.join(CONFIG.diagnostic_clip_dir, f"{prefix}*{ext}"))
+        if not matches:
+            parts = base.split("_")
+            if len(parts) >= 3:
+                alt_prefix = f"{parts[0]}_{parts[1]}_{parts[2]}"
+                matches = glob.glob(os.path.join(CONFIG.diagnostic_clip_dir, f"{alt_prefix}*{ext}"))
+        if matches:
+            filepath = matches[0]
+        else:
+            raise HTTPException(status_code=404, detail="Clip not found")
+
+    # 2. Check or create web-compatible H.264 cache
+    cache_dir = os.path.join(CONFIG.diagnostic_clip_dir, ".web_cache")
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except Exception:
+        cache_dir = "/tmp/cctv_clips_cache"
+        os.makedirs(cache_dir, exist_ok=True)
+
+    clip_base = os.path.splitext(os.path.basename(filepath))[0]
+    web_filepath = os.path.join(cache_dir, f"{clip_base}_h264.mp4")
+
+    if not os.path.exists(web_filepath):
+        cmd = [
+            "ffmpeg", "-y", "-i", filepath,
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            web_filepath
+        ]
+        try:
+            res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if res.returncode == 0 and os.path.exists(web_filepath):
+                return FileResponse(web_filepath, media_type="video/mp4")
+        except Exception:
+            pass
+
+    if os.path.exists(web_filepath):
+        return FileResponse(web_filepath, media_type="video/mp4")
+
+    return FileResponse(filepath, media_type="video/mp4")
 
 
 @app.get("/frame", tags=["Stream"])
