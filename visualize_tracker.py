@@ -12,7 +12,7 @@ logger = logging.getLogger("visualize_tracker")
 # Load config and custom types/trackers
 from src.config import CONFIG, load_config
 from src.object_tracker import ObjectTracker
-from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines
+from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines, draw_zonal_tripwire, draw_tracked_person
 from src.video_reader import ThreadedVideoReader
 
 # Define a premium color scheme (BGR format)
@@ -191,6 +191,8 @@ def draw_hud_sidebar(frame, tracker, is_paused, show_roi, show_tripwire, show_hi
         draw_text(f"YOLO Conf: {tracker.conf:.2f}")
         draw_text(f"Track Buffer: {tracker.track_buffer} frames")
         draw_text(f"Strict Segment: {tracker.tripwire_strict_segment}")
+        draw_text(f"Track Anchor: {getattr(tracker, 'tracker_point', 'bottom_center')}")
+        draw_text(f"Track Stitch: {getattr(tracker, 'track_stitching', True)}")
         
         draw_header("TRIPWIRE SETTINGS")
         dead_pct = int(tracker.dead_zone_width * 100)
@@ -264,12 +266,22 @@ def draw_tracking_boxes(frame, tracker):
         box_color = COLOR_CYAN
         cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2, cv2.LINE_AA)
         
-        # Draw centroid
-        cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
-        cv2.circle(frame, (cx, cy), 5, COLOR_RED, -1)
+        # Draw tracking anchor point (bottom-center footprint or centroid)
+        anchor_mode = getattr(tracker, "tracker_point", "bottom_center")
+        if anchor_mode == "bottom_center":
+            ax, ay = int((x1 + x2) / 2), y2
+        else:
+            ax, ay = int((x1 + x2) / 2), int((y1 + y2) / 2)
+        
+        cv2.circle(frame, (ax, ay), 5, COLOR_RED, -1, cv2.LINE_AA)
+        cv2.circle(frame, (ax, ay), 8, COLOR_WHITE, 1, cv2.LINE_AA)
+        
+        # Determine zone label
+        side = tracker.track_confirmed_sides.get(tid)
+        zone_str = {1: "INSIDE", -1: "OUTSIDE", 0: "THRESHOLD"}.get(side, "?")
         
         # Overlay active labels
-        label = f"ID: {tid} ({conf:.2f})"
+        label = f"ID: {tid} ({conf:.2f}) [{zone_str}]"
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 0.45
         thickness = 1
@@ -288,54 +300,16 @@ def draw_tracking_boxes(frame, tracker):
 
 def draw_tripwires(frame, tracker):
     """
-    Draws the primary tripwire segment, its directional inside entry arrow,
-    and a semi-transparent yellow dead zone area bounding box.
+    Draws the dual-zone state machine tripwire overlay:
+    centerline, directional inside arrow, threshold dead zone polygon, and boundary lines.
     """
     h, w, _ = frame.shape
     tx1, ty1 = int(tracker.tripwire_line[0][0] * w), int(tracker.tripwire_line[0][1] * h)
     tx2, ty2 = int(tracker.tripwire_line[1][0] * w), int(tracker.tripwire_line[1][1] * h)
     pt_A = (tx1, ty1)
     pt_B = (tx2, ty2)
-    
-    # Draw primary Tripwire Segment
-    cv2.line(frame, pt_A, pt_B, (255, 0, 0), 3, cv2.LINE_AA)
-    cv2.circle(frame, pt_A, 6, (0, 0, 255), -1)  # Point A (Red)
-    cv2.circle(frame, pt_B, 6, (255, 0, 0), -1)  # Point B (Blue)
-    
-    # Point Labels
-    cv2.putText(frame, "A", (pt_A[0] - 15, pt_A[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA)
-    cv2.putText(frame, "B", (pt_B[0] + 10, pt_B[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2, cv2.LINE_AA)
-    
-    # Draw Perpendicular Arrow pointing to INSIDE/ENTER (+1 side)
-    mid, arrow_dest = calculate_arrow_endpoint(pt_A, pt_B)
-    cv2.arrowedLine(frame, mid, arrow_dest, COLOR_GREEN, 3, tipLength=0.3, line_type=cv2.LINE_AA)
-    cv2.putText(frame, "INSIDE / ENTER", (arrow_dest[0] + 10, arrow_dest[1] + 5),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_GREEN, 2, cv2.LINE_AA)
-    
-    # Draw Dead Zone bounding lines & transparent yellow fill
-    dead_zone_width = tracker.dead_zone_width
-    if dead_zone_width > 0:
-        dead_zone_half_px = (dead_zone_width * h) / 2.0
-        (ins_A, ins_B), (out_A, out_B) = compute_dead_zone_lines(pt_A, pt_B, dead_zone_half_px)
-        
-        # Optimized: crop polygon bounding box ROI to avoid full-frame copy/blend
-        pts = np.array([ins_A, ins_B, out_B, out_A], dtype=np.int32)
-        x_box, y_box, w_box, h_box = cv2.boundingRect(pts)
-        
-        x1 = max(0, x_box)
-        y1 = max(0, y_box)
-        x2 = min(w, x_box + w_box)
-        y2 = min(h, y_box + h_box)
-        
-        if x2 > x1 and y2 > y1:
-            sub_frame = frame[y1:y2, x1:x2]
-            overlay = sub_frame.copy()
-            local_pts = pts - np.array([x1, y1])
-            cv2.fillPoly(overlay, [local_pts], COLOR_GOLD)
-            cv2.addWeighted(overlay, 0.15, sub_frame, 0.85, 0, sub_frame)
-        
-        cv2.line(frame, ins_A, ins_B, (0, 200, 220), 1, cv2.LINE_AA)
-        cv2.line(frame, out_A, out_B, (0, 200, 220), 1, cv2.LINE_AA)
+    dead_zone_half_px = (tracker.dead_zone_width * h) / 2.0
+    draw_zonal_tripwire(frame, pt_A, pt_B, dead_zone_half_px)
 
 
 def draw_motion_roi(frame):

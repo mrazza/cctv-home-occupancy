@@ -92,7 +92,11 @@ class PipelineOrchestrator:
             conf=CONFIG.tracker_confidence,
             track_buffer=CONFIG.track_buffer,
             yolo_imgsz=CONFIG.yolo_imgsz,
-            yolo_device=CONFIG.yolo_device
+            yolo_device=CONFIG.yolo_device,
+            tracker_point=CONFIG.tracker_point,
+            track_stitching=CONFIG.track_stitching,
+            track_stitching_max_frames=CONFIG.track_stitching_max_frames,
+            track_stitching_max_dist=CONFIG.track_stitching_max_dist
         )
         self.cooldown_frames = cooldown_frames
         self.fps_limit = fps_limit
@@ -136,7 +140,8 @@ class PipelineOrchestrator:
                     method=CONFIG.low_light_method,
                     clip_limit=CONFIG.clahe_clip_limit,
                     grid_size=CONFIG.clahe_grid_size,
-                    gamma=CONFIG.gamma_value
+                    gamma=CONFIG.gamma_value,
+                    denoise_prefilter=CONFIG.low_light_denoise_prefilter
                 )
             else:
                 processing_frame = frame

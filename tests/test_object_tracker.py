@@ -577,3 +577,113 @@ def test_object_tracker_yolo_imgsz_and_device(temp_dir):
         )
 
 
+
+
+def test_tracker_point_bottom_center(temp_dir):
+    """Verifies that tracker_point='bottom_center' tracks the ground contact point (cx, y2)."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        # Tripwire at y = 0.5 (middle of frame at y=50 on 100-height frame)
+        tracker = ObjectTracker(
+            tripwire_line=[(0.0, 0.5), (1.0, 0.5)],
+            snapshot_dir=temp_dir,
+            tracker_point="bottom_center"
+        )
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        
+        # Bounding box: y1=10, y2=45.
+        # Centroid y is (10+45)/2 = 27.5 (outside, y < 50)
+        # Foot contact y is y2 = 45 (also outside, y < 50)
+        boxes_f1 = MockBoxes([[40, 10, 60, 45]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
+        tracker.process_frame(frame)
+        
+        # Verify track history recorded bottom-center foot coordinate: (50.0, 45.0)
+        assert tracker.track_histories[1][-1] == (50.0, 45.0)
+        assert tracker.track_confirmed_sides[1] == -1  # Outside (-1 side)
+
+
+def test_track_stitching_across_threshold(temp_dir):
+    """
+    Verifies that spatial-temporal track stitching correctly fuses a fragmented track
+    that dropped in the threshold zone, enabling successful ENTER event registration.
+    """
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        # Tripwire at y = 0.5 (pixel 50), dead zone = 0.2 (±10 px, threshold zone is 40..60)
+        # Inside is y > 60, Outside is y < 40.
+        tracker = ObjectTracker(
+            tripwire_line=[(0.0, 0.5), (1.0, 0.5)],
+            snapshot_dir=temp_dir,
+            dead_zone_width=0.2,
+            tracker_point="centroid",
+            track_stitching=True,
+            track_stitching_max_frames=10,
+            track_stitching_max_dist=50.0
+        )
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        
+        # Frame 1: Track 1 starts in Outside Zone (centroid y = 20)
+        boxes_f1 = MockBoxes([[40, 10, 60, 30]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
+        events_f1 = tracker.process_frame(frame)
+        assert events_f1 == []
+        assert tracker.track_confirmed_sides[1] == -1  # Confirmed OUTSIDE (-1)
+        
+        # Frame 2: Track 1 moves into Threshold Zone (centroid y = 48)
+        boxes_f2 = MockBoxes([[40, 38, 60, 58]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f2)]
+        events_f2 = tracker.process_frame(frame)
+        assert events_f2 == []
+        
+        # Frame 3-5: Track 1 drops (occlusion/low-light dropout for 3 frames)
+        for _ in range(tracker.track_buffer + 1):
+            mock_yolo.return_value.track.return_value = [MockResult(boxes=MockBoxes([], [], []))]
+            tracker.process_frame(frame)
+            
+        # Track 1 has expired and moved into stitching buffer
+        assert 1 not in tracker.track_histories
+        assert len(tracker._recent_lost_tracks) == 1
+        assert tracker._recent_lost_tracks[0]["tracker_id"] == 1
+        assert tracker._recent_lost_tracks[0]["confirmed_side"] == -1
+        
+        # Next Frame: ByteTrack spawns a NEW Track ID: Track 2 at (50, 70), inside Inside Zone!
+        # Distance from (50, 48) to (50, 70) is 22px <= 50px max_dist, and gap <= 10 frames.
+        boxes_fnew = MockBoxes([[40, 60, 60, 80]], [2], [0.92])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_fnew)]
+        events_new = tracker.process_frame(frame)
+        
+        # Track 2 should have stitched to Track 1's OUTSIDE origin, and now reached INSIDE -> ENTER!
+        assert len(events_new) == 1
+        assert events_new[0].event_type == "ENTER"
+        assert events_new[0].tracker_id == 2
+
+
+def test_track_stitching_disabled(temp_dir):
+    """Verifies that when track_stitching=False, fragmented tracks do NOT stitch across threshold."""
+    with patch("src.object_tracker.YOLO") as mock_yolo:
+        tracker = ObjectTracker(
+            tripwire_line=[(0.0, 0.5), (1.0, 0.5)],
+            snapshot_dir=temp_dir,
+            dead_zone_width=0.2,
+            tracker_point="centroid",
+            track_stitching=False
+        )
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        
+        # Frame 1: Track 1 starts in Outside Zone (centroid y = 20)
+        boxes_f1 = MockBoxes([[40, 10, 60, 30]], [1], [0.95])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_f1)]
+        tracker.process_frame(frame)
+        
+        # Fast forward to drop Track 1
+        for _ in range(tracker.track_buffer + 1):
+            mock_yolo.return_value.track.return_value = [MockResult(boxes=MockBoxes([], [], []))]
+            tracker.process_frame(frame)
+            
+        # Track 2 spawns inside Inside Zone (y = 70)
+        boxes_fnew = MockBoxes([[40, 60, 60, 80]], [2], [0.92])
+        mock_yolo.return_value.track.return_value = [MockResult(boxes=boxes_fnew)]
+        events_new = tracker.process_frame(frame)
+        
+        # Without stitching, Track 2 initializes as INSIDE (+1) and does NOT trigger ENTER!
+        assert events_new == []
+        assert tracker.track_confirmed_sides[2] == 1

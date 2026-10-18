@@ -48,6 +48,8 @@ class CameraConfig(BaseModel):
     clahe_clip_limit: float = Field(default=2.0, description="Contrast limit factor for CLAHE enhancement")
     clahe_grid_size: int = Field(default=8, description="Tile grid size for CLAHE enhancement")
     gamma_value: float = Field(default=1.5, description="Gamma correction factor (> 0.0) for gamma enhancement")
+    low_light_denoise_prefilter: bool = Field(default=True, description="Apply lightweight pre-smoothing to suppress sensor grain before CLAHE enhancement")
+    occupancy_impute_missing_arrivals: bool = Field(default=False, description="When a LEAVE occurs while occupancy is 0, retroactively log an INFERRED_ENTER to maintain conservation of presence")
 
     # Diagnostic Video Clip Settings
     diagnostic_clip_enabled: bool = Field(default=False, description="Whether to save diagnostic video clips of crossing events")
@@ -79,9 +81,25 @@ class CameraConfig(BaseModel):
                     "Lower values catch more detections but may increase false positives."
     )
     track_buffer: int = Field(
-        default=30,
+        default=60,
         description="Number of frames to keep lost tracks alive before reassigning a new tracker ID. "
-                    "At 10 FPS, the default of 30 means tracks survive 3 seconds of occlusion."
+                    "At 10 FPS, the default of 60 means tracks survive 6 seconds of occlusion."
+    )
+    tracker_point: str = Field(
+        default="bottom_center",
+        description="Bounding box anchor point used for line/zone crossing: 'bottom_center' (footprint ground contact) or 'centroid'"
+    )
+    track_stitching: bool = Field(
+        default=True,
+        description="Whether to stitch fragmented track IDs across the threshold zone if dropped within the stitching window"
+    )
+    track_stitching_max_frames: int = Field(
+        default=30,
+        description="Maximum frame gap between a dropped track and a new track to stitch"
+    )
+    track_stitching_max_dist: float = Field(
+        default=120.0,
+        description="Maximum pixel distance between dropped track's last point and new track's start point to stitch"
     )
     
     # Database Settings
@@ -133,6 +151,10 @@ def load_config() -> CameraConfig:
         except Exception as e:
             print(f"[-] Warning: Failed to parse config JSON: {e}")
             
+    # Support 'conf' shorthand alias from JSON config for tracker_confidence
+    if "conf" in config_dict and "tracker_confidence" not in config_dict:
+        config_dict["tracker_confidence"] = float(config_dict.pop("conf"))
+            
     # 2. Override from Environment Variables
     env_mappings = {
         "CCTV_RTSP_URL": ("rtsp_url", str),
@@ -154,6 +176,13 @@ def load_config() -> CameraConfig:
         "CCTV_DEAD_ZONE_WIDTH": ("tripwire_dead_zone_width", float),
         "CCTV_TRIPWIRE_STRICT_SEGMENT": ("tripwire_strict_segment", lambda x: str(x).lower() in ("true", "1", "yes")),
         "CCTV_TRACKER_CONFIDENCE": ("tracker_confidence", float),
+        "CCTV_CONF": ("tracker_confidence", float),
+        "CCTV_TRACKER_POINT": ("tracker_point", str),
+        "CCTV_TRACK_STITCHING": ("track_stitching", lambda x: str(x).lower() in ("true", "1", "yes")),
+        "CCTV_TRACK_STITCHING_MAX_FRAMES": ("track_stitching_max_frames", int),
+        "CCTV_TRACK_STITCHING_MAX_DIST": ("track_stitching_max_dist", float),
+        "CCTV_LOW_LIGHT_DENOISE_PREFILTER": ("low_light_denoise_prefilter", lambda x: str(x).lower() in ("true", "1", "yes")),
+        "CCTV_OCCUPANCY_IMPUTE_MISSING_ARRIVALS": ("occupancy_impute_missing_arrivals", lambda x: str(x).lower() in ("true", "1", "yes")),
         "CCTV_TRACK_BUFFER": ("track_buffer", int),
         "CCTV_VIDEO_BUFFER_SIZE": ("video_buffer_size", int),
         "CCTV_YOLO_IMGSZ": ("yolo_imgsz", _parse_yolo_imgsz),

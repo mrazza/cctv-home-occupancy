@@ -58,12 +58,11 @@ In screen coordinates, the top-left corner is `(0.0, 0.0)` and the bottom-right 
 
 ---
 
-### 3. Hysteresis Dead Zone
-To prevent centroid jitter from causing spurious, rapid-fire `ENTER` and `LEAVE` events (e.g. when someone stands on or lingers near the tripwire), the tracker employs a configurable **hysteresis dead zone** around the tripwire.
-- The dead zone is defined as a fraction of the frame height (via `tripwire_dead_zone_width`, default `0.05` or 5%).
-- A track's side state is only updated/committed (and an event emitted) when the person's centroid **fully clears** the dead zone boundary on the opposite side of the line.
-- Movement inside the dead zone is ignored and does not alter the confirmed side state.
-- Set the dead zone width to `0.0` to disable this behavior and trigger events immediately upon any crossing.
+### 3. Dual-Zone State Machine & Footprint Anchor Tracking
+To prevent jitter and survive brief detection dropouts (especially in low-light / IR conditions), the tracker utilizes a **Dual-Zone State Machine** and **bottom-center footprint ground contact tracking**:
+- **Dual-Zone Geometry:** The threshold line is bounded by an amber **Threshold Zone** (defined by `tripwire_dead_zone_width`) separating the **Outside Zone (-1)** and **Inside Zone (+1)**.
+- **Footprint Anchor (`tracker_point="bottom_center"`):** Tracks the bottom-center point of the bounding box `(cx, y2)` rather than the centroid `(cx, cy)`. Floor contact points are physically stable and invariant to torso silhouette fluctuation and cast shadows under directional lighting.
+- **Spatial-Temporal Track Stitching (`track_stitching=true`):** If ByteTrack drops a track for 1–2 frames directly in the doorway due to motion blur or low IR contrast, newly spawned tracks within the threshold window (`track_stitching_max_frames` and `track_stitching_max_dist`) are seamlessly stitched to the original track's zone origin, guaranteeing reliable event registration across fragmented tracks.
 
 ---
 
@@ -159,6 +158,11 @@ The system is highly configurable. You can specify settings via a JSON configura
 | `tripwire_line` | `CCTV_TRIPWIRE_LINE` | `[[0.2, 0.5], [0.8, 0.5]]` | Coordinates of the tripwire line segment `[[x1, y1], [x2, y2]]` normalized between `0.0` and `1.0`. |
 | `tripwire_dead_zone_width` | `CCTV_DEAD_ZONE_WIDTH` | `0.05` | Width of the hysteresis dead zone around the tripwire, as a fraction of frame height. |
 | `tripwire_strict_segment` | `CCTV_TRIPWIRE_STRICT_SEGMENT` | `false` | If `true`, requires the centroid projection to fall strictly within the tripwire line segment to register a crossing. |
+| `tracker_point` | `CCTV_TRACKER_POINT` | `"bottom_center"` | Anchor point on bounding box for zone crossing: `"bottom_center"` (feet floor contact) or `"centroid"`. |
+| `track_stitching` | `CCTV_TRACK_STITCHING` | `true` | Whether to stitch fragmented track IDs across the threshold zone if dropped temporarily. |
+| `track_stitching_max_frames` | `CCTV_TRACK_STITCHING_MAX_FRAMES` | `30` | Maximum frame gap to stitch dropped tracks across the threshold. |
+| `track_stitching_max_dist` | `CCTV_TRACK_STITCHING_MAX_DIST` | `120.0` | Maximum Euclidean pixel distance between dropped track and new track to stitch. |
+| `low_light_denoise_prefilter` | `CCTV_LOW_LIGHT_DENOISE_PREFILTER` | `true` | Apply 3x3 Gaussian pre-smoothing on luminance channel to prevent sensor grain amplification before CLAHE. |
 
 #### 🌐 API Server & Stream Control Settings
 

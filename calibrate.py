@@ -5,7 +5,7 @@ import argparse
 import numpy as np
 from typing import Tuple, List, Optional
 from src.config import CONFIG
-from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines
+from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines, draw_zonal_tripwire
 
 
 def normalize_coordinates(A: Tuple[int, int], B: Tuple[int, int], width: int, height: int, sort_coords: bool = False) -> List[Tuple[float, float]]:
@@ -203,38 +203,8 @@ class CalibrationApp:
                 cv2.putText(frame_draw, "Status: Click to place Point B", (15, h - 20),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
             elif self.pt_B:
-                # Locked Tripwire
-                cv2.line(frame_draw, self.pt_A, self.pt_B, (255, 0, 0), 3, cv2.LINE_AA)
-                cv2.circle(frame_draw, self.pt_A, 6, (0, 0, 255), -1)
-                cv2.circle(frame_draw, self.pt_B, 6, (255, 0, 0), -1)
-                
-                # Label Point A & B
-                cv2.putText(frame_draw, "A", (self.pt_A[0] - 15, self.pt_A[1] - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA)
-                cv2.putText(frame_draw, "B", (self.pt_B[0] + 10, self.pt_B[1] - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2, cv2.LINE_AA)
-                
-                # Calculate and draw left perpendicular arrow
-                mid, arrow_dest = calculate_arrow_endpoint(self.pt_A, self.pt_B)
-                cv2.arrowedLine(frame_draw, mid, arrow_dest, (0, 255, 0), 3, tipLength=0.3, line_type=cv2.LINE_AA)
-                cv2.putText(frame_draw, "INSIDE / ENTER", (arrow_dest[0] + 10, arrow_dest[1] + 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
-                
-                # Draw dead zone visualization
-                dead_zone_width = CONFIG.tripwire_dead_zone_width
-                if dead_zone_width > 0:
-                    dead_zone_half_px = (dead_zone_width * h) / 2.0
-                    (ins_A, ins_B), (out_A, out_B) = compute_dead_zone_lines(self.pt_A, self.pt_B, dead_zone_half_px)
-                    
-                    # Semi-transparent dead zone fill
-                    overlay = frame_draw.copy()
-                    zone_polygon = np.array([ins_A, ins_B, out_B, out_A], dtype=np.int32)
-                    cv2.fillPoly(overlay, [zone_polygon], (0, 255, 255))  # Yellow fill
-                    cv2.addWeighted(overlay, 0.15, frame_draw, 0.85, 0, frame_draw)
-                    
-                    # Thin boundary lines
-                    cv2.line(frame_draw, ins_A, ins_B, (255, 255, 0), 1, cv2.LINE_AA)
-                    cv2.line(frame_draw, out_A, out_B, (255, 255, 0), 1, cv2.LINE_AA)
+                dead_zone_half_px = (CONFIG.tripwire_dead_zone_width * h) / 2.0
+                draw_zonal_tripwire(frame_draw, self.pt_A, self.pt_B, dead_zone_half_px)
                 
                 cv2.putText(frame_draw, "Status: Ready to Save [S] or Reset [R]", (15, h - 20),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
