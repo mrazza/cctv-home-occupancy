@@ -415,3 +415,27 @@ def test_get_clip_endpoint(tmp_path, monkeypatch):
 
     response_404 = client.get("/clip/non_existent.mp4")
     assert response_404.status_code == 404
+
+
+def test_get_current_frame_with_enhancement(reset_frame_registry):
+    import numpy as np
+    from src.pipeline import FrameRegistry
+    
+    # Register a dark test frame (e.g. 50 intensity)
+    test_frame = np.full((100, 100, 3), 40, dtype=np.uint8)
+    FrameRegistry.set_frame(test_frame)
+    
+    # Request without enhancement
+    res_raw = client.get("/frame")
+    assert res_raw.status_code == 200
+    assert res_raw.headers["content-type"] == "image/jpeg"
+    
+    # Request with enhancement (default method: clahe)
+    res_enh = client.get("/frame?enhance_low_light=true")
+    assert res_enh.status_code == 200
+    assert res_enh.headers["content-type"] == "image/jpeg"
+
+    # Request with gamma override
+    res_gamma = client.get("/frame?enhance_low_light=true&enhancement_method=gamma")
+    assert res_gamma.status_code == 200
+    assert res_gamma.headers["content-type"] == "image/jpeg"

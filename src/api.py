@@ -11,6 +11,7 @@ from src.config import CONFIG
 from src.database import DatabaseManager
 from src.pipeline import FrameRegistry
 from src.visualization import calculate_arrow_endpoint, compute_dead_zone_lines, draw_zonal_tripwire, draw_tracked_person
+from src.preprocessing import enhance_low_light as apply_low_light_enhancement
 
 app = FastAPI(
     title="House Presence Monitoring API",
@@ -182,6 +183,8 @@ def get_clip(filename: str):
 def get_current_frame(
     draw_tripwire: bool = Query(default=False, description="Draw the tripwire line and inside direction vector on the frame"),
     draw_roi: bool = Query(default=False, description="Draw the motion detection Region of Interest (ROI) polygon/bounding box on the frame"),
+    enhance_low_light: bool = Query(default=False, description="Apply low-light contrast enhancement (CLAHE/Gamma) to the returned frame"),
+    enhancement_method: Optional[str] = Query(default=None, description="Optional override for low-light enhancement method ('clahe', 'gamma', 'both')"),
     width: Optional[int] = Query(default=None, ge=1, description="Optional target width for resizing"),
     height: Optional[int] = Query(default=None, ge=1, description="Optional target height for resizing")
 ):
@@ -210,6 +213,20 @@ def get_current_frame(
         cap.release()
         if not ret or frame is None:
             raise HTTPException(status_code=503, detail="Failed to retrieve frame from camera stream.")
+
+    frame = frame.copy()
+
+    # 2b. Optional: Apply low-light contrast enhancement if requested
+    if enhance_low_light:
+        method = (enhancement_method or CONFIG.low_light_method).lower().strip()
+        frame = apply_low_light_enhancement(
+            frame,
+            method=method,
+            clip_limit=CONFIG.clahe_clip_limit,
+            grid_size=CONFIG.clahe_grid_size,
+            gamma=CONFIG.gamma_value,
+            denoise_prefilter=CONFIG.low_light_denoise_prefilter
+        )
 
     # 3. Optional: Draw Tripwire & Zonal State Machine Overlay
     if draw_tripwire:
